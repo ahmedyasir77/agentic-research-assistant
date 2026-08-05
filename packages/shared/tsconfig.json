@@ -1,0 +1,16 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": ["ES2023"],
+    // No ambient environment types: this package is imported by both the server
+    // and the browser, so it must not depend on either one's globals.
+    "types": [],
+    // Source is written with explicit `.ts` import extensions so Node can run it
+    // directly; tsc rewrites them to `.js` on the way out.
+    "allowImportingTsExtensions": true,
+    "rewriteRelativeImportExtensions": true
+  },
+  "include": ["src/**/*.ts", "vitest.config.ts"]
+}

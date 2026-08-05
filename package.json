@@ -1,0 +1,35 @@
+{
+  "name": "agentic-research-assistant",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.34.5",
+  "engines": {
+    "node": ">=22.18.0"
+  },
+  "scripts": {
+    "build:shared": "pnpm --filter @ara/shared build",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm build:shared && pnpm -r typecheck",
+    "test": "pnpm build:shared && pnpm -r test",
+    "test:coverage": "pnpm build:shared && pnpm -r test:coverage",
+    "dev": "pnpm build:shared && pnpm -r --parallel dev",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.0",
+    "eslint": "^9.39.0",
+    "eslint-config-prettier": "^10.1.8",
+    "prettier": "^3.6.2",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.46.0"
+  }
+}
