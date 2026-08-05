@@ -3,4 +3,7 @@
  * boundary is defined once, here, as a Zod schema — the TypeScript types are
  * inferred from the schemas so the two can never drift.
  */
-export const SHARED_CONTRACT_VERSION = 1;
+export * from './api.ts';
+export * from './events.ts';
+export * from './json.ts';
+export * from './trace.ts';
