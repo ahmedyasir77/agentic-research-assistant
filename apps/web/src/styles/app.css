@@ -1,0 +1,485 @@
+@import './tokens.css';
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--instrument);
+  font-size: 15px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* One visible focus treatment everywhere, including for the disclosure triangles. */
+:focus-visible {
+  outline: 2px solid var(--signal);
+  outline-offset: 2px;
+  border-radius: 1px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+.app {
+  max-width: 56rem;
+  margin: 0 auto;
+  padding: calc(var(--step) * 5) calc(var(--step) * 3) calc(var(--step) * 12);
+}
+
+/* ---- masthead ------------------------------------------------------------ */
+
+.masthead {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--step);
+  align-items: baseline;
+  justify-content: space-between;
+  padding-bottom: calc(var(--step) * 3);
+}
+
+.masthead__title {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.mode {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5em;
+  padding: 0.2em 0.6em;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  font-size: 0.75rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.mode__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--signal);
+}
+
+.mode--live .mode__dot {
+  background: var(--flag);
+}
+
+/* ---- composer ------------------------------------------------------------ */
+
+.composer__row {
+  display: flex;
+  gap: var(--step);
+}
+
+.composer__input {
+  flex: 1;
+  min-width: 0;
+  padding: 0.7em 0.8em;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  background: var(--card);
+  color: inherit;
+  font: inherit;
+}
+
+.composer__input::placeholder {
+  color: var(--muted);
+}
+
+.composer__submit {
+  padding: 0.7em 1.4em;
+  border: 1px solid var(--signal);
+  border-radius: var(--radius);
+  background: var(--signal);
+  color: var(--card);
+  font: inherit;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.composer__submit[disabled] {
+  border-color: var(--rule);
+  background: transparent;
+  color: var(--muted);
+  cursor: not-allowed;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: calc(var(--step) * 0.75);
+  margin-top: calc(var(--step) * 1.5);
+}
+
+.chips__label {
+  color: var(--muted);
+  font-size: 0.75rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  align-self: center;
+}
+
+.chip {
+  padding: 0.3em 0.7em;
+  border: 1px dashed var(--rule);
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.chip:hover:not([disabled]) {
+  border-style: solid;
+  border-color: var(--signal);
+  color: var(--signal);
+}
+
+.chip[disabled] {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+/* ---- counters ------------------------------------------------------------ */
+
+.counters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: calc(var(--step) * 3);
+  margin-top: calc(var(--step) * 4);
+  padding-bottom: calc(var(--step) * 2);
+  border-bottom: 1px solid var(--rule);
+}
+
+.counter__label {
+  display: block;
+  color: var(--muted);
+  font-size: 0.7rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.counter__value {
+  font-size: 1.05rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.counter__value--over {
+  color: var(--flag);
+}
+
+/* ---- the trace ----------------------------------------------------------- */
+
+.trace {
+  margin-top: calc(var(--step) * 4);
+}
+
+.timeline {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.node {
+  position: relative;
+  padding-left: calc(var(--step) * 4);
+  padding-bottom: calc(var(--step) * 3);
+}
+
+/* The line itself: drawn behind every node, so it grows as the run advances. */
+.node::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0.55rem;
+  bottom: 0;
+  width: var(--trace-width);
+  background: var(--signal);
+}
+
+/* The head of a run still going: the trace stops in mid-air rather than at a node. */
+.node--live::before {
+  background: linear-gradient(to bottom, var(--signal), transparent);
+}
+
+/* The terminus: an answer or a failure ends the line at its own node. */
+.node--terminal::before {
+  bottom: auto;
+  height: 0.55rem;
+}
+
+.node::after {
+  content: '';
+  position: absolute;
+  left: -3px;
+  top: 0.35rem;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--signal);
+}
+
+.node--failed::before,
+.node--failed::after {
+  background: var(--flag);
+}
+
+.node__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--step);
+  color: var(--muted);
+  font-size: 0.75rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+/* The two places a person is being addressed — and the only prose on the page. */
+.prose {
+  margin: calc(var(--step) * 1.5) 0 0;
+  font-family: var(--voice);
+  font-size: 0.95rem;
+  line-height: 1.65;
+}
+
+/* ---- tool calls ---------------------------------------------------------- */
+
+.calls {
+  margin-top: calc(var(--step) * 2);
+  display: grid;
+  gap: var(--step);
+}
+
+.call {
+  border: 1px solid var(--rule);
+  border-left: 3px solid var(--signal);
+  border-radius: var(--radius);
+  background: var(--card);
+}
+
+.call--error {
+  border-left-color: var(--flag);
+  background: var(--flag-wash);
+}
+
+.call--running {
+  border-left-color: var(--muted);
+}
+
+.call__summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--step);
+  padding: 0.55em 0.7em;
+  cursor: pointer;
+  list-style: none;
+}
+
+.call__summary::-webkit-details-marker {
+  display: none;
+}
+
+.call__summary::before {
+  content: '▸';
+  color: var(--muted);
+}
+
+.call[open] > .call__summary::before {
+  content: '▾';
+}
+
+.call__name {
+  font-weight: 600;
+}
+
+.call__args {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.call__timing {
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.call__error {
+  margin: 0;
+  padding: 0 0.7em 0.6em;
+  color: var(--flag);
+  font-size: 0.85rem;
+}
+
+.payload {
+  margin: 0;
+  padding: 0.6em 0.7em;
+  border-top: 1px solid var(--rule);
+  overflow-x: auto;
+  font-size: 0.78rem;
+  line-height: 1.5;
+  white-space: pre;
+}
+
+.payload__label {
+  display: block;
+  color: var(--muted);
+  font-size: 0.7rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+/* ---- answer and failure -------------------------------------------------- */
+
+.panel {
+  padding: calc(var(--step) * 2.5);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  background: var(--card);
+}
+
+.panel--failed {
+  border-color: var(--flag);
+  background: var(--flag-wash);
+}
+
+.panel__title {
+  margin: 0;
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.panel--failed .panel__title {
+  color: var(--flag);
+}
+
+.citation {
+  color: var(--signal);
+  font-family: var(--instrument);
+  font-size: 0.72em;
+  vertical-align: super;
+  text-decoration: none;
+}
+
+.citation:hover {
+  text-decoration: underline;
+}
+
+.citation--unverified {
+  color: var(--flag);
+  text-decoration: underline dashed;
+}
+
+.sources {
+  margin: calc(var(--step) * 3) 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: var(--step);
+}
+
+.source {
+  display: flex;
+  gap: var(--step);
+  align-items: baseline;
+  font-size: 0.82rem;
+}
+
+.source__id {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.source__link {
+  color: var(--ink);
+  text-decoration-color: var(--signal);
+  text-underline-offset: 3px;
+  overflow-wrap: anywhere;
+}
+
+/* Unverified sources differ by treatment, not colour alone — a dashed underline
+   and a flag glyph read the same to someone who cannot distinguish the two. */
+.source--unverified .source__link {
+  color: var(--muted);
+  text-decoration-style: dashed;
+  text-decoration-color: var(--flag);
+}
+
+.source__flag {
+  color: var(--flag);
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.warnings {
+  margin: calc(var(--step) * 2) 0 0;
+  padding: calc(var(--step) * 1.5);
+  border-left: 3px solid var(--flag);
+  background: var(--flag-wash);
+  font-size: 0.82rem;
+}
+
+.warnings__list {
+  margin: 0.4em 0 0;
+  padding-left: 1.2em;
+}
+
+.notice {
+  margin-top: calc(var(--step) * 3);
+  padding: calc(var(--step) * 2);
+  border: 1px solid var(--flag);
+  border-radius: var(--radius);
+  background: var(--flag-wash);
+  font-size: 0.88rem;
+}
+
+.empty {
+  margin-top: calc(var(--step) * 6);
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+@media (max-width: 42rem) {
+  .app {
+    padding: calc(var(--step) * 3) calc(var(--step) * 2) calc(var(--step) * 8);
+  }
+
+  .composer__row {
+    flex-direction: column;
+  }
+
+  .counters {
+    gap: calc(var(--step) * 2);
+  }
+}

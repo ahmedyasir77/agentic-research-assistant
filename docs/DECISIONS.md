@@ -429,3 +429,79 @@ health endpoints rather than one. Liveness deliberately checks nothing but the
 process: a dependency being down is not a reason to have the container restarted.
 The drain timeout is a bound, not a promise — a run that outlives it is abandoned
 and logged, because refusing to exit is worse than losing one answer.
+
+---
+
+## ADR-024 — Design tokens: "the trace"
+
+**Context.** This is a live-updating view of machine reasoning, so the timeline is
+the signature element and everything else should stay quiet. Three looks were
+deliberately avoided because they are what everything built in 2026 looks like:
+cream background with a serif display face and a terracotta accent; near-black with
+a single acid accent; and the hairline-rule broadsheet grid.
+
+**Decision.** One continuous vertical rule runs down the left of the page — the
+trace — and the run advances along it. Step cards hang off the trace to the right;
+the segment behind the run's head is drawn in `--signal`, the segment ahead is not
+drawn at all, so the line grows as the agent works. The answer docks at the bottom
+as the trace's terminus, and a failure terminates it in `--flag` instead. The
+composer sits at the top, where the trace starts.
+
+*A run is a signal advancing through time, so the interface is built around the
+shape a logic analyser draws — which also makes "it is still going" legible from
+across a room, without an animation.*
+
+**Six values.** Cool greys with blue in them, not neutral and not warm:
+
+| Token | Hex | Used for |
+| --- | --- | --- |
+| `--ink` | `#16202B` | Body text and the drawn trace |
+| `--muted` | `#5D6E7E` | Labels, timings, step numbers |
+| `--paper` | `#E8ECF0` | Page background |
+| `--card` | `#FCFDFE` | Step cards and the answer pane |
+| `--signal` | `#0B69C7` | Live: the trace's head, running counters, links |
+| `--flag` | `#B0362A` | Failures, refused calls, unverified citations |
+
+Note what is *not* here: a separate "success" green. Verified and unverified
+citations are distinguished by treatment — a solid underline against a dashed rule
+and a flag glyph — not by colour alone, so the anti-hallucination check reads the
+same to someone who cannot tell the two apart.
+
+**Two typefaces, both already on the machine.**
+
+- **Instrument** — `ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas,
+  monospace`. Headings, step numbers, tool names, counters, and every raw payload.
+- **Voice** — `ui-sans-serif, system-ui, "Segoe UI", Roboto, Helvetica, Arial`.
+  Used in exactly two places: the model's reasoning text, and the final answer.
+
+**Consequences.** The usual hierarchy is inverted — the monospace is the display
+face and the proportional face is the restrained one — so you can tell the
+instrument from the argument at a glance, and the two moments where the machine
+is actually addressing a person stand out by being the only prose on the page.
+Character comes from weight, tracking and case rather than from a novelty face,
+which matters because **no webfont is loaded**: a Google Fonts link would make the
+offline demo issue a network request, and the one promise `DEMO_MODE=offline` makes
+is that it does not. The cost is that the display face is whatever monospace the
+viewer has, so the page looks slightly different on Windows than on macOS.
+
+---
+
+## ADR-025 — `GET /api/config`, and why the offline indicator is not a switch
+
+**Context.** The UI needs to show, from the moment it loads, that a run is offline
+— that is the point of the offline mode, and on stage it is the thing worth
+pointing at. It also needs the event schema version, which `events.ts` was already
+written to expect the client to check.
+
+**Decision.** One endpoint, `GET /api/config`, returning `{ demoMode, modelId,
+eventSchemaVersion }`. The UI renders the mode as a status indicator, not a toggle.
+
+**Consequences.** The brief asked for a toggle; this is a label instead, and that
+is a deliberate departure. `DEMO_MODE` is a server-side environment variable read
+once at boot: a switch in the browser could not change it, and a switch that
+silently does nothing is worse than a label that is true. Making it real would mean
+letting an unauthenticated client choose to spend money on model calls, which is a
+different feature with different requirements. `pnpm demo` remains the way to
+choose the mode, and the badge tells you which one you got. The version field earns
+the endpoint on its own: a browser tab left open across a deploy can now say
+"reload" rather than quietly dropping events it does not understand.

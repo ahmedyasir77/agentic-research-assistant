@@ -1,5 +1,6 @@
 import {
   AgentEventSchema,
+  AppConfigSchema,
   CreateRunResponseSchema,
   ListToolsResponseSchema,
   PROBLEM_CONTENT_TYPE,
@@ -65,6 +66,7 @@ function buildApi(
     // High by default so the limiter does not fire on unrelated tests; the test
     // that cares about it sets its own.
     rateLimitPerMin: overrides.rateLimitPerMin ?? 100,
+    demoMode: 'offline',
   });
   return { ...api, store };
 }
@@ -279,6 +281,20 @@ describe('ingress limits', () => {
 
     expect(ProblemDetailsSchema.parse(response.body).type).toBe('/problems/at-capacity');
     await store.get(first.runId)?.whenFinished;
+  });
+});
+
+describe('GET /api/config', () => {
+  it('tells the browser which mode it is talking to', async () => {
+    const { app } = buildApi();
+
+    const response = await request(app).get('/api/config').expect(200);
+
+    expect(AppConfigSchema.parse(response.body)).toStrictEqual({
+      demoMode: 'offline',
+      modelId: 'fake-model',
+      eventSchemaVersion: 1,
+    });
   });
 });
 

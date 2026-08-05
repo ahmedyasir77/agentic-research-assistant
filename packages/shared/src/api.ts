@@ -17,6 +17,18 @@ export const CreateRunResponseSchema = z.object({
 });
 export type CreateRunResponse = z.infer<typeof CreateRunResponseSchema>;
 
+/**
+ * What the browser needs to know before it starts a run: which mode the server was
+ * deployed in, which model is answering, and whether this tab still understands the
+ * event contract. Everything else about a run arrives in `run.started`.
+ */
+export const AppConfigSchema = z.object({
+  demoMode: z.enum(['live', 'offline']),
+  modelId: z.string().min(1),
+  eventSchemaVersion: z.number().int().positive(),
+});
+export type AppConfig = z.infer<typeof AppConfigSchema>;
+
 /** A tool as the model sees it: the same Zod schema, converted to JSON Schema. */
 export const ToolSpecSchema = z.object({
   name: z.string().min(1),

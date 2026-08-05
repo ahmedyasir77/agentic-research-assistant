@@ -1,0 +1,27 @@
+/**
+ * The token system from docs/DECISIONS.md, ADR-024 — "the trace".
+ *
+ * Six values, both typefaces already on the machine. No webfont is loaded on
+ * purpose: the one promise DEMO_MODE=offline makes is that it issues no network
+ * request, and a font link would break it silently, on stage.
+ */
+:root {
+  --ink: #16202b;
+  --muted: #5d6e7e;
+  --paper: #e8ecf0;
+  --card: #fcfdfe;
+  --signal: #0b69c7;
+  --flag: #b0362a;
+
+  /* Derived, so a token change propagates rather than being pasted around. */
+  --rule: color-mix(in srgb, var(--muted) 28%, transparent);
+  --signal-wash: color-mix(in srgb, var(--signal) 8%, transparent);
+  --flag-wash: color-mix(in srgb, var(--flag) 8%, transparent);
+
+  --instrument: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace;
+  --voice: ui-sans-serif, system-ui, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+
+  --step: 0.5rem;
+  --radius: 3px;
+  --trace-width: 2px;
+}

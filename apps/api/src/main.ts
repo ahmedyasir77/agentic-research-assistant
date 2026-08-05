@@ -24,6 +24,7 @@ const { app, lifecycle } = createApi({
   store,
   logger,
   rateLimitPerMin: config.rateLimitPerMin,
+  demoMode: config.demoMode,
 });
 
 const server = app.listen(config.port, () => {

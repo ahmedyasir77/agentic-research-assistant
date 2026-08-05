@@ -7,6 +7,7 @@ import type { RunStore } from '../runs/store.ts';
 import { Lifecycle } from './lifecycle.ts';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler.ts';
 import { createRequestLogging } from './middleware/requestLogging.ts';
+import { createConfigRouter } from './routes/config.ts';
 import { createOperationsRouter } from './routes/operations.ts';
 import { createRunsRouter } from './routes/runs.ts';
 import { createToolsRouter } from './routes/tools.ts';
@@ -23,6 +24,7 @@ export interface ServerDeps {
   readonly store: RunStore;
   readonly logger: Logger;
   readonly rateLimitPerMin: number;
+  readonly demoMode: 'live' | 'offline';
   readonly lifecycle?: Lifecycle;
 }
 
@@ -51,6 +53,10 @@ export function createApi(deps: ServerDeps): Api {
   app.use(express.json({ limit: MAX_BODY_BYTES }));
 
   app.use(createOperationsRouter({ lifecycle, store: deps.store }));
+  app.use(
+    '/api/config',
+    createConfigRouter({ demoMode: deps.demoMode, modelId: deps.runtime.modelId }),
+  );
   app.use('/api/tools', createToolsRouter(deps.runtime.tools));
   app.use(
     '/api/runs',
