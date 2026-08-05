@@ -111,3 +111,79 @@ carrying the validated answer. The client appends deltas as they arrive.
 **Consequences.** The UI is already written for streaming, so a future streaming
 adapter emits more deltas with no contract change and no client change. Nothing in
 the product claims to stream tokens that it does not stream.
+
+---
+
+## ADR-008 — Retry search and the model, but never `http_get`
+
+**Context.** `withRetry` is generic and it is tempting to wrap every outbound call
+in it. Retries are not free: they multiply load on a struggling service, and they
+multiply side effects when the call is not idempotent in practice.
+
+**Decision.** Retries are applied to the LLM call and the search provider — both are
+our own dependency, both fail transiently, both are safely repeatable. `http_get`
+is **not** retried.
+
+**Consequences.** `http_get` points at an arbitrary third party the model chose. We
+know nothing about that server's rate limits, its cost model, or whether the URL is
+really side-effect free — a `GET` that triggers work is a bad API, but it is a
+common one. Retrying it would let one agent run turn into three requests against a
+stranger's server. The agent handles a failed fetch the way a person would: it is
+told the fetch failed and it tries a different source.
+
+---
+
+## ADR-009 — The calculator is a parser, not an evaluator
+
+**Context.** The obvious implementation of an arithmetic tool is `eval` or
+`new Function`. The expression comes from a language model, and that model reads
+web pages the agent fetched — so the expression is attacker-influenced input.
+
+**Decision.** An explicit tokenizer and shunting-yard evaluator supporting
+`+ - * / % ^ ( )` and unary minus. No `eval`, no `new Function`, no `node:vm`. The
+ESLint config bans the first two outright.
+
+**Consequences.** More code than a one-liner, and it is the code most worth reading:
+a parser can only ever produce a number, so the worst outcome of a hostile
+expression is a parse error. `node:vm` is explicitly not an answer here — it is an
+isolation feature, not a security boundary. The test suite feeds it
+`process.exit(0)`, `require("child_process")`, and `constructor.constructor(...)`
+and asserts each one is a parse error.
+
+---
+
+## ADR-010 — SSRF is decided on resolved addresses, and re-decided per redirect
+
+**Context.** `http_get` lets a model aim an HTTP request from inside our network.
+A hostname-based blocklist does not work: an attacker controls what
+`evil.example.com` resolves to, and a public URL can redirect to
+`169.254.169.254`.
+
+**Decision.** `platform/ssrf.ts` resolves the hostname and judges every returned
+address against loopback, private, link-local, CGNAT, ULA and multicast ranges —
+including IPv4-mapped IPv6 in both dotted and hex forms. If any one answer is
+blocked, the request is refused. Redirects are followed by hand, one hop at a time,
+with the same check on each `Location`; the HTTP client is configured with
+`maxRedirects: 0` so it cannot follow one behind our back.
+
+**Consequences.** The DNS resolver is injected, so the whole matrix — `localhost`,
+`169.254.169.254`, `10.x`, a public name resolving to a private address, a
+redirect into a private range — is a fast unit test with no network. The cost is a
+resolution per hop and a small TOCTOU window between our lookup and the socket's;
+closing that needs connection-level pinning, which is noted as future work.
+
+---
+
+## ADR-011 — A narrow `HttpClient` port instead of passing Axios around
+
+**Context.** The guarded fetch needs an HTTP client. Depending on `AxiosInstance`
+directly would mean every test either hits the network, adds an interceptor
+library, or casts a stub to a large third-party interface.
+
+**Decision.** `platform/httpClient.ts` defines the four fields the guarded fetch
+actually uses, and adapts Axios to it in one function.
+
+**Consequences.** A test fake is a few lines and needs no casting, which is what
+made the SSRF and size-cap tests possible without `msw`. Axios stays confined to
+one adapter, alongside the other two ports (`LlmClient`, `SearchProvider`) — the
+same pattern in all three places.
