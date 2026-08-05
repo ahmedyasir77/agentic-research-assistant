@@ -30,6 +30,10 @@ const EnvSchema = z
     MAX_OUTPUT_TOKENS: z.coerce.number().int().min(256).max(64_000).default(4_096),
 
     RATE_LIMIT_PER_MIN: z.coerce.number().int().min(1).default(10),
+
+    // Where recorded fixtures live. Defaults to the repo's fixtures/ directory,
+    // resolved from the module's own path; set explicitly in a container.
+    FIXTURES_DIR: z.string().min(1).optional(),
   })
   .superRefine((env, ctx) => {
     if (env.DEMO_MODE === 'live' && env.ANTHROPIC_API_KEY === undefined) {
@@ -71,6 +75,7 @@ export interface Config {
     readonly maxOutputTokens: number;
   };
   readonly rateLimitPerMin: number;
+  readonly fixturesDir?: string;
 }
 
 export interface ConfigIssue {
@@ -121,6 +126,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
       maxOutputTokens: raw.MAX_OUTPUT_TOKENS,
     }),
     rateLimitPerMin: raw.RATE_LIMIT_PER_MIN,
+    ...(raw.FIXTURES_DIR === undefined ? {} : { fixturesDir: raw.FIXTURES_DIR }),
   });
 }
 

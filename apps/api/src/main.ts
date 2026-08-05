@@ -1,18 +1,21 @@
-import { EVENT_SCHEMA_VERSION } from '@ara/shared';
-
+import { createAgentRuntime } from './composition.ts';
 import { loadConfigOrExit } from './config/env.ts';
+import { createLogger } from './platform/logger.ts';
 
-// Replaced in M5 by the Express server. Until then it proves the boot path: config
-// is parsed once, a bad environment exits here, and secrets stay redacted.
+// The boot path so far: parse config once, build a logger, compose the runtime for
+// the configured mode. M5 hands the result to an Express server; today it reports
+// what it built so the wiring is verifiable from a terminal.
 const config = loadConfigOrExit(process.env);
+const logger = createLogger({ level: config.logLevel });
 
-console.log(
-  JSON.stringify({
-    msg: 'agentic-research-assistant api',
+const runtime = createAgentRuntime({ config, logger });
+
+logger.info(
+  {
     demoMode: config.demoMode,
-    modelId: config.llm.modelId,
-    searchProvider: config.search.provider,
-    eventSchemaVersion: EVENT_SCHEMA_VERSION,
-    config,
-  }),
+    modelId: runtime.modelId,
+    tools: runtime.tools.names,
+    port: config.port,
+  },
+  'agent runtime ready',
 );

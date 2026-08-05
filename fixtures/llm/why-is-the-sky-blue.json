@@ -1,0 +1,87 @@
+{
+  "description": "The default offline run: search, read one source, compute the scattering ratio, then finish with two verifiable citations.",
+  "turns": [
+    {
+      "content": [
+        {
+          "type": "text",
+          "text": "I need current sources rather than answering from memory, so I will search first and then read the most authoritative result in full."
+        },
+        {
+          "type": "tool_use",
+          "id": "call_search_1",
+          "name": "web_search",
+          "input": { "query": "why is the sky blue rayleigh scattering", "maxResults": 3 }
+        }
+      ],
+      "stopReason": "tool_use",
+      "usage": { "inputTokens": 1240, "outputTokens": 96 },
+      "modelId": "fake-model"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "text": "The Wikipedia result looks the most precise about the wavelength relationship. I will read it properly before citing it."
+        },
+        {
+          "type": "tool_use",
+          "id": "call_fetch_1",
+          "name": "http_get",
+          "input": { "url": "https://en.wikipedia.org/wiki/Rayleigh_scattering" }
+        }
+      ],
+      "stopReason": "tool_use",
+      "usage": { "inputTokens": 1580, "outputTokens": 74 },
+      "modelId": "fake-model"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "text": "The page states the inverse fourth-power law. Let me check the 450 nm versus 700 nm ratio it claims rather than repeating the number on trust."
+        },
+        {
+          "type": "tool_use",
+          "id": "call_calc_1",
+          "name": "calculator",
+          "input": { "expression": "(700 / 450) ^ 4" }
+        }
+      ],
+      "stopReason": "tool_use",
+      "usage": { "inputTokens": 2310, "outputTokens": 68 },
+      "modelId": "fake-model"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "text": "The arithmetic confirms the source. I can answer now."
+        },
+        {
+          "type": "tool_use",
+          "id": "call_finish_1",
+          "name": "finish",
+          "input": {
+            "answer": "The sky is blue because of Rayleigh scattering: air molecules are far smaller than the wavelength of visible light, and they scatter short wavelengths much more strongly than long ones. [1]\n\nThe effect is steep. Scattered intensity varies with the inverse fourth power of wavelength, so blue light at about 450 nm is scattered roughly 5.9 times more than red light at about 700 nm — a ratio I checked directly rather than taking on trust. Sunlight reaching you from every direction other than the sun itself is therefore dominated by blue. [1]\n\nTwo details are worth adding. Violet scatters even more strongly than blue, but sunlight contains less of it and the human eye is less sensitive to it, so the sky reads as blue rather than violet. [1] And at sunset the light travels a much longer path through the atmosphere, by which point most of the blue has been scattered away and the reds and oranges are what remain. [2]",
+            "citations": [
+              {
+                "id": 1,
+                "url": "https://en.wikipedia.org/wiki/Rayleigh_scattering",
+                "title": "Rayleigh scattering — Wikipedia"
+              },
+              {
+                "id": 2,
+                "url": "https://example.org/atmospheric-optics",
+                "title": "Atmospheric optics: scattering and colour"
+              }
+            ]
+          }
+        }
+      ],
+      "stopReason": "tool_use",
+      "usage": { "inputTokens": 2640, "outputTokens": 412 },
+      "modelId": "fake-model"
+    }
+  ]
+}

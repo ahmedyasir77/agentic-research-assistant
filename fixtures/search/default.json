@@ -1,0 +1,17 @@
+{
+  "query": "(fallback used when no recorded query matches)",
+  "results": [
+    {
+      "title": "Offline demo — this result is recorded, not live",
+      "url": "https://example.org/offline-demo",
+      "snippet": "This run is using DEMO_MODE=offline, so search results come from fixtures/search/ rather than a live provider. Record a fixture for a query to script a different run.",
+      "publishedAt": "2026-08-01T00:00:00.000Z"
+    },
+    {
+      "title": "How to record a fixture",
+      "url": "https://example.org/offline-demo/recording",
+      "snippet": "Run once against the live providers with DEMO_MODE=live, then save the run trace's tool results into fixtures/search and fixtures/pages.",
+      "publishedAt": "2026-08-01T00:00:00.000Z"
+    }
+  ]
+}

@@ -1,0 +1,6 @@
+{
+  "url": "https://en.wikipedia.org/wiki/Rayleigh_scattering",
+  "status": 200,
+  "contentType": "text/html",
+  "body": "<html><head><title>Rayleigh scattering</title><style>body{margin:0}</style></head><body><h1>Rayleigh scattering</h1><p>Rayleigh scattering is the elastic scattering of light by particles much smaller than the wavelength of the light. It occurs when light passes through gases such as the Earth's atmosphere.</p><p>The scattered intensity is inversely proportional to the fourth power of the wavelength. Blue light, at roughly 450 nm, is therefore scattered about 5.5 times more strongly than red light at roughly 700 nm.</p><p>Because shorter wavelengths scatter more, sunlight arriving from every direction is dominated by blue, which is why a clear daytime sky appears blue rather than the violet that scatters even more strongly &mdash; the human eye is less sensitive to violet, and sunlight contains less of it.</p><script>trackPageView();</script></body></html>"
+}

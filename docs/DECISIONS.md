@@ -187,3 +187,59 @@ actually uses, and adapts Axios to it in one function.
 made the SSRF and size-cap tests possible without `msw`. Axios stays confined to
 one adapter, alongside the other two ports (`LlmClient`, `SearchProvider`) — the
 same pattern in all three places.
+
+---
+
+## ADR-012 — Offline mode swaps transports, not guards
+
+**Context.** The easy way to build an offline mode is to bypass the machinery: skip
+the tool registry, skip validation, return a canned answer. That produces a demo
+that proves nothing, and it rots, because the bypassed code is never exercised.
+
+**Decision.** Offline replaces exactly three adapters — the LLM client, the search
+provider and the HTTP transport — with fixture-backed implementations behind the
+same ports. Everything else runs unchanged: the same tool registry, the same Zod
+validation, the same SSRF guard, the same redirect and size limits, the same
+`finish` contract.
+
+**Consequences.** An offline run exercises essentially the whole system, so the
+demo is evidence rather than theatre. There is a test asserting that `http_get`
+against `169.254.169.254` is still refused *in offline mode* — the guard is not
+something the fixtures get to skip. The cost is a fixture HTTP client that would
+not otherwise exist; without it the recorded model turn would name a real URL and
+an "offline" run would quietly reach the network, which is the failure that
+matters most because it only shows up on the day of the demo.
+
+---
+
+## ADR-013 — One composition root, no mode checks anywhere else
+
+**Context.** `if (offline)` scattered through the codebase is how a demo mode
+becomes a second, half-tested application.
+
+**Decision.** `apps/api/src/composition.ts` is the only file that reads
+`config.demoMode`. It picks adapters and returns an `AgentRuntime`; everything
+below it receives dependencies as arguments and cannot tell which mode it is in.
+
+**Consequences.** Grepping for `demoMode` outside config and composition returning
+nothing is the invariant, and it is easy to check in review. Live mode currently
+*rejects* rather than falling back to fixtures until the Anthropic adapter lands in
+M7 — a run that claims to be live must actually be live, and a silent fallback is
+the kind of thing that makes a demo dishonest without anyone noticing.
+
+---
+
+## ADR-014 — Cost is an estimate, and the code says so
+
+**Context.** `estimatedCostUsd` in the trace invites the reader to treat it as a
+bill. It is not one: it knows nothing about prompt caching, batch pricing, or an
+organisation's negotiated rate.
+
+**Decision.** `llm/pricing.ts` prices tokens at published list rates from a small
+table, prices the offline demo at zero, and falls back to the most expensive tier
+for an unrecognised model.
+
+**Consequences.** The number is roughly right, which beats no number — "what did
+that run cost" is the first question anyone asks about an agent. Rounding an
+unknown model *up* means a surprise shows up as an overstatement rather than a
+silent zero.

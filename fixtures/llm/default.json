@@ -1,0 +1,53 @@
+{
+  "description": "Fallback offline run for any query without its own recorded script: one search, then a cited answer.",
+  "turns": [
+    {
+      "content": [
+        {
+          "type": "text",
+          "text": "I do not have a recorded script for this exact question, so I will search and answer from what comes back."
+        },
+        {
+          "type": "tool_use",
+          "id": "call_search_1",
+          "name": "web_search",
+          "input": { "query": "background reading", "maxResults": 2 }
+        }
+      ],
+      "stopReason": "tool_use",
+      "usage": { "inputTokens": 1180, "outputTokens": 82 },
+      "modelId": "fake-model"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "text": "That is enough to answer at the level of detail the sources support."
+        },
+        {
+          "type": "tool_use",
+          "id": "call_finish_1",
+          "name": "finish",
+          "input": {
+            "answer": "This run is offline, so the model turns and the search results are replayed from `fixtures/` rather than fetched live. The agent still executed the real loop: it planned, called the real `web_search` tool through the real registry, had its arguments validated, and returned this answer through the validated `finish` tool. [1]\n\nTo see a scripted end-to-end run with a fetched source and a calculation, ask \"Why is the sky blue?\" — that query has its own recorded fixture. [2]",
+            "citations": [
+              {
+                "id": 1,
+                "url": "https://example.org/offline-demo",
+                "title": "Offline demo — this result is recorded, not live"
+              },
+              {
+                "id": 2,
+                "url": "https://example.org/offline-demo/recording",
+                "title": "How to record a fixture"
+              }
+            ]
+          }
+        }
+      ],
+      "stopReason": "tool_use",
+      "usage": { "inputTokens": 1520, "outputTokens": 214 },
+      "modelId": "fake-model"
+    }
+  ]
+}

@@ -1,0 +1,23 @@
+{
+  "query": "why is the sky blue rayleigh scattering",
+  "results": [
+    {
+      "title": "Rayleigh scattering — Wikipedia",
+      "url": "https://en.wikipedia.org/wiki/Rayleigh_scattering",
+      "snippet": "Rayleigh scattering is the scattering of light by particles much smaller than the wavelength of the radiation. The intensity of scattered light varies inversely with the fourth power of the wavelength.",
+      "publishedAt": "2026-05-14T09:12:00.000Z"
+    },
+    {
+      "title": "Why is the sky blue? — NASA Space Place",
+      "url": "https://spaceplace.nasa.gov/blue-sky/en/",
+      "snippet": "Blue light is scattered in all directions by the tiny molecules of air in Earth's atmosphere. Blue is scattered more than other colours because it travels as shorter, smaller waves.",
+      "publishedAt": "2026-02-03T00:00:00.000Z"
+    },
+    {
+      "title": "Atmospheric optics: scattering and colour",
+      "url": "https://example.org/atmospheric-optics",
+      "snippet": "At sunset light travels a longer path through the atmosphere, scattering away most of the blue and leaving the reds and oranges that reach the observer.",
+      "publishedAt": "2025-11-20T00:00:00.000Z"
+    }
+  ]
+}
