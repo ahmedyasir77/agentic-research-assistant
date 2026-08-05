@@ -243,3 +243,57 @@ for an unrecognised model.
 that run cost" is the first question anyone asks about an agent. Rounding an
 unknown model *up* means a surprise shows up as an overstatement rather than a
 silent zero.
+
+---
+
+## ADR-015 — The `finish` payload is not evidence for itself
+
+**Context.** The citation check compares the URLs the agent cited against the URLs
+tools returned during the run. `finish` is a tool, and its output echoes its input,
+so the obvious implementation — collect URLs from every successful tool result —
+adds the agent's own claimed citations to the evidence set. The check then verifies
+the answer against itself: it passes every time and catches nothing.
+
+**Decision.** `finish` is excluded from URL collection. Only tools that actually
+went and got something count as evidence.
+
+**Consequences.** This is a one-line condition guarding the project's headline
+feature, and it was found by a test asserting an invented URL is marked unverified
+— the check had been silently passing everything before that. The lesson is worth
+keeping: a guardrail with no test proving it *fails* on bad input is not a guardrail.
+
+---
+
+## ADR-016 — Unverified citations are flagged, not deleted, and the prose is left alone
+
+**Context.** When a citation cannot be accounted for, there are three options:
+delete it, rewrite the answer to remove the marker, or keep both and mark it.
+
+**Decision.** Keep the citation with `verified: false`, add a warning to the trace,
+and leave the model's prose untouched. The UI distinguishes verified from stripped.
+
+**Consequences.** Showing that the agent claimed a source and the check caught it
+is more informative than a quietly shortened list — the failure is the interesting
+part. Rewriting the answer to remove `[2]` was rejected: editing model prose with
+string surgery risks corrupting a correct answer to hide a citation problem, and
+the reader is better served by an honest marker than a doctored paragraph. The cost
+is that a reader who ignores the flag sees a `[2]` with a struck-through source.
+
+---
+
+## ADR-017 — The loop returns its trace instead of writing one
+
+**Context.** Something has to produce the `RunTrace` served by `GET /api/runs/:id`.
+Two obvious options: have the loop write into a store it holds a reference to, or
+rebuild the trace from the event stream.
+
+**Decision.** `runAgent` is an `AsyncGenerator<AgentEvent, RunTrace>` — it yields
+events as they happen and *returns* the finished trace. Callers that only want to
+watch can `for await`; the run service drives it with `.next()` and keeps the
+return value.
+
+**Consequences.** The loop still owns no I/O and no storage, so it stays testable
+with nothing but a fake model. Rebuilding the trace from events was rejected
+because it would duplicate the bookkeeping and drift from it. The optional `emit`
+dep exists alongside the yielded events so the store can record a run whose HTTP
+client has disconnected.

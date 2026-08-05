@@ -1,6 +1,8 @@
 import { lookup } from 'node:dns/promises';
 import { isIPv4, isIPv6 } from 'node:net';
 
+import { redactUrlCredentials } from './redact.ts';
+
 /**
  * `http_get` lets a language model choose a URL for a server we control to fetch.
  * Unguarded, that is a request forgery primitive: the model can be talked into
@@ -14,9 +16,13 @@ export class BlockedUrlError extends Error {
   readonly url: string;
 
   constructor(url: string, reason: string) {
-    super(`Refused to fetch ${url}: ${reason}`);
+    // The URL is echoed back to the model and written into the trace, so any
+    // credentials in it are stripped first — the refusal must not publish the
+    // very secret it refused to send.
+    const safe = redactUrlCredentials(url);
+    super(`Refused to fetch ${safe}: ${reason}`);
     this.name = 'BlockedUrlError';
-    this.url = url;
+    this.url = safe;
   }
 }
 

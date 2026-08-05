@@ -30,7 +30,7 @@ export function redactArgs(value: JsonValue): JsonValue {
  * `https://user:pass@host/` is rejected before it is ever fetched, but the
  * argument is recorded either way — so the password is stripped from the record.
  */
-function redactUrlCredentials(value: string): string {
+export function redactUrlCredentials(value: string): string {
   if (!value.includes('@') || !/^https?:\/\//iu.test(value)) return value;
 
   try {

@@ -31,6 +31,8 @@ export const ToolResultBlockSchema = z.object({
   isError: z.boolean(),
 });
 
+export type ToolUseBlock = z.infer<typeof ToolUseBlockSchema>;
+
 /** What a model may say back to us. */
 export const AssistantBlockSchema = z.discriminatedUnion('type', [
   TextBlockSchema,
@@ -93,7 +95,7 @@ export class LlmError extends Error {
 }
 
 /** Convenience for the loop and the tests: the tool calls in a response, in order. */
-export function toolUses(response: LlmResponse): readonly z.infer<typeof ToolUseBlockSchema>[] {
+export function toolUses(response: LlmResponse): readonly ToolUseBlock[] {
   return response.content.filter((block) => block.type === 'tool_use');
 }
 
