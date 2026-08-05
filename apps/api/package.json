@@ -6,6 +6,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "dev": "node --watch --enable-source-maps src/main.ts",
+    "demo": "DEMO_MODE=offline SEARCH_PROVIDER=fixture node --enable-source-maps src/main.ts",
     "start": "node --enable-source-maps dist/main.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",

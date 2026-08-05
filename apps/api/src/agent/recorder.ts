@@ -25,7 +25,6 @@ export interface RecorderInit {
   readonly budgets: RunBudgets;
   readonly modelId: string;
   readonly clock: Clock;
-  readonly emit?: (event: AgentEvent) => void;
 }
 
 /**
@@ -69,7 +68,6 @@ export class RunRecorder {
       ts: new Date(this.#init.clock.now()).toISOString(),
     });
     this.#seq += 1;
-    this.#init.emit?.(event);
     return event;
   }
 

@@ -24,12 +24,6 @@ export interface AgentDeps {
   readonly policy: AgentPolicy;
   readonly clock: Clock;
   readonly logger: Logger;
-  /**
-   * A side channel for every event, in addition to the ones yielded. The HTTP
-   * layer iterates the generator to push SSE; the run store subscribes here. That
-   * way a run keeps recording even when nobody is listening to the stream.
-   */
-  readonly emit?: (event: AgentEvent) => void;
 }
 
 /**

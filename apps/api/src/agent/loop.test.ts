@@ -55,8 +55,7 @@ function fakeClock(stepMs = 10): Clock {
 function deps(
   turns: readonly LlmResponse[],
   overrides: { policy?: Partial<AgentPolicy>; clock?: Clock; llm?: FakeLlmClient } = {},
-): AgentDeps & { emitted: AgentEvent[] } {
-  const emitted: AgentEvent[] = [];
+): AgentDeps {
   return {
     runId: 'run_test',
     llm: overrides.llm ?? createFakeLlmClient(turns),
@@ -68,8 +67,6 @@ function deps(
     policy: { ...DEFAULT_POLICY, ...overrides.policy },
     clock: overrides.clock ?? fakeClock(),
     logger: silentLogger,
-    emit: (event) => emitted.push(event),
-    emitted,
   };
 }
 
@@ -145,13 +142,6 @@ describe('scenario 1 — the happy path', () => {
       'answer.delta',
       'run.completed',
     ]);
-  });
-
-  it('emits every event to the side channel as well as the stream', async () => {
-    const agentDeps = deps([finishCall('Done. [1]', [])]);
-    const { events } = await run('anything', agentDeps);
-
-    expect(agentDeps.emitted).toStrictEqual(events);
   });
 
   it('numbers events so a reconnecting client can tell what it missed', async () => {

@@ -294,6 +294,138 @@ return value.
 
 **Consequences.** The loop still owns no I/O and no storage, so it stays testable
 with nothing but a fake model. Rebuilding the trace from events was rejected
-because it would duplicate the bookkeeping and drift from it. The optional `emit`
-dep exists alongside the yielded events so the store can record a run whose HTTP
-client has disconnected.
+because it would duplicate the bookkeeping and drift from it. There is exactly one
+channel for events — an earlier `emit` side-channel was removed once the run
+service turned out to need `.next()` anyway, because two paths carrying the same
+events is two paths that can disagree.
+
+
+---
+
+## ADR-018 — Search fixtures are named after the query the model issues
+
+**Context.** `fixtures/search/why-is-the-sky-blue.json` looked correct and was
+unreachable. The fixture adapter resolves a file by slugifying the **search query**,
+and the recorded model searches for `why is the sky blue rayleigh scattering`, not
+for the user's question. The lookup fell through to `default.json`, the demo run
+silently searched the wrong thing, and one of its two citations came back
+`verified: false` — the guardrail working correctly on a broken fixture.
+
+**Decision.** Search fixtures are named for the model's query
+(`why-is-the-sky-blue-rayleigh-scattering.json`); LLM scripts stay named for the
+user's question. `fixtures.test.ts` now resolves each script's own tool calls
+through the same slug rules the adapters use, and asserts that every cited URL is
+one *that script* would have seen.
+
+**Consequences.** The two directories are keyed by different things, which is
+surprising until you notice they are replacing different APIs — so the rule is
+written down in `fixtures/README.md` and enforced by a test rather than by memory.
+The earlier version of that test asked only whether a cited URL appeared in *some*
+search fixture, which is why an unreachable file passed CI. Both bugs found in this
+project so far have been a check that verified something against itself.
+
+---
+
+## ADR-019 — SSE with POST-then-subscribe, not WebSocket and not a streaming POST
+
+**Context.** The browser needs to watch a run unfold. Three options: stream the
+events out of the `POST /api/runs` response; open a WebSocket; or create the run
+and subscribe to it separately.
+
+**Decision.** `POST /api/runs` returns `202 { runId, eventsUrl }`, and the client
+subscribes to `GET /api/runs/:id/events` as an SSE stream. Each frame carries the
+event's sequence number as its SSE `id`.
+
+**Consequences.** It costs one extra round trip and buys three things. The browser
+can use `EventSource`, which reconnects on its own and re-attaches with
+`Last-Event-ID` — the emitter replays only what was missed. A run is not tied to
+the connection that started it, so a dropped socket does not kill work in progress.
+And the run stays fetchable as a trace after it ends, which is what makes
+`GET /api/runs/:id` a replay rather than a log. WebSocket was rejected because
+nothing here needs a client→server channel mid-run; a duplex protocol would be
+strictly more moving parts for a one-way stream. Streaming from the POST was
+rejected because it makes the run's lifetime the connection's lifetime.
+
+Frames carry no `event:` field: everything arrives on one `onmessage` handler and
+is discriminated by parsing with the shared Zod union, which is one parser instead
+of nine listeners that can drift from the schema.
+
+---
+
+## ADR-020 — Runs live in memory, with a TTL, a cap, and backpressure
+
+**Context.** A run has to be readable after it ends, by a client that reconnects or
+by someone fetching the trace. The obvious answers are a database or a cache.
+
+**Decision.** An in-process `RunStore`: a `Map` with a 15-minute TTL and a 100-run
+cap, swept on read and write rather than on a timer. Finished runs are evicted
+oldest-first; runs still in flight are never evicted. When the cap is full of
+in-flight runs, `POST /api/runs` returns `503` rather than accepting work it cannot
+bound.
+
+**Consequences.** No database, per the project's constraints, and no background
+interval to keep the event loop alive at shutdown. What breaks at multiple
+instances is explicit: a run created on instance A is a 404 on instance B, and the
+per-process rate limiter counts separately on each. What would change is the
+storage, not the shape — the trace is already a serialisable document and events
+already carry a monotonic `seq`, so this becomes a Redis stream keyed by `runId`
+with the same two operations. Refusing at capacity rather than queueing was chosen
+because a queue with no durability is just a slower way to lose the work.
+
+---
+
+## ADR-021 — One error handler, RFC 9457, and validation by throwing
+
+**Context.** Express error handling drifts into per-route try/catch and ad-hoc JSON
+error shapes unless something stops it.
+
+**Decision.** Every error becomes `application/problem+json` in one
+`errorHandler`. Handlers never catch: they call `Schema.parse(req.body)` and let
+the `ZodError` propagate — Express 5 forwards rejected promises, so the same path
+covers sync and async. `ProblemError` carries status, title, type and any headers
+a problem needs (`Retry-After`). `body-parser`'s two failure modes and the store's
+`RunCapacityError` are mapped at that same boundary.
+
+**Consequences.** Route handlers are three or four lines with no error plumbing,
+and the client has exactly one error shape to parse. Zod validation is a call
+rather than a middleware on purpose: a middleware would have to hand the parsed
+value onward through `res.locals`, which is typed `any` and would put a cast into
+every handler. Unrecognised errors return a deliberately uninformative 500 — the
+detail goes to the log, where it helps, not to the client, where it is disclosure.
+
+---
+
+## ADR-022 — The rate limiter is forty lines of ours, not a dependency
+
+**Context.** Ingress limits call for a per-IP limit on run creation.
+`express-rate-limit` is the default answer and is outside the fixed stack.
+
+**Decision.** A fixed-window limiter in `http/middleware/rateLimit.ts`: a `Map` of
+address → window, swept when it grows past 10,000 entries, with the clock injected.
+
+**Consequences.** No dependency to justify, and the behaviour is a unit test rather
+than a configuration. A fixed window lets a caller burst across the boundary; with
+one instance and a 10/minute default that does not matter, and the honest fix at
+scale is a shared store, not a cleverer local algorithm. The key is
+client-controlled, so the table is bounded — an unbounded map keyed by remote
+address is a memory leak with a nice name. `trust proxy` is set to exactly one hop
+(the Container Apps ingress); trusting further would let any client forge the
+address it is counted against.
+
+---
+
+## ADR-023 — Readiness fails first, then runs drain, then the server closes
+
+**Context.** SIGTERM arrives while agent runs are mid-flight. Killing them drops a
+user's answer seconds before it arrives.
+
+**Decision.** `shutdown()` flips a `Lifecycle` flag so `/readyz` starts returning
+503, waits on every in-flight run's `whenFinished` up to 30 seconds, drops idle
+keep-alive sockets, then closes the server. `/healthz` stays green throughout.
+
+**Consequences.** The load balancer stops routing new requests while this instance
+is still able to serve the ones it holds, which is the entire point of having two
+health endpoints rather than one. Liveness deliberately checks nothing but the
+process: a dependency being down is not a reason to have the container restarted.
+The drain timeout is a bound, not a promise — a run that outlives it is abandoned
+and logged, because refusing to exit is worse than losing one answer.

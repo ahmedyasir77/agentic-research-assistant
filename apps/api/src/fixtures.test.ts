@@ -120,22 +120,20 @@ describe('llm fixtures', () => {
     }
   });
 
-  it('cites only urls that appear in the search fixtures', async () => {
-    const known = new Set<string>();
-    for (const file of await jsonFilesIn('search')) {
-      const fixture = await readJsonFixture(join(FIXTURES, 'search', file), SearchFixtureSchema);
-      for (const result of fixture.results) known.add(result.url);
-    }
-
+  it('cites only urls the script itself would have seen', async () => {
     for (const file of await jsonFilesIn('llm')) {
       const script = await readJsonFixture(join(FIXTURES, 'llm', file), LlmScriptSchema);
+      const reachable = await urlsReachableBy(script);
+
       for (const scriptTurn of script.turns) {
         for (const block of scriptTurn.content) {
           if (block.type !== 'tool_use' || block.name !== 'finish') continue;
           for (const url of citedUrls(block.input)) {
-            // Otherwise the recorded demo would trip its own citation check and
-            // show a stripped citation where a real one was intended.
-            expect(known, `${file} cites ${url}`).toContain(url);
+            // Not "appears in some fixture somewhere" — appears in a fixture this
+            // script's own tool calls would resolve to. A search fixture named
+            // after the wrong query is unreachable, and a demo that cites it shows
+            // the citation check failing on a source that was supposed to be real.
+            expect([...reachable], `${file} cites ${url}`).toContain(url);
           }
         }
       }
@@ -143,7 +141,59 @@ describe('llm fixtures', () => {
   });
 });
 
+/**
+ * Every URL a script's own tool calls would put in front of the citation check,
+ * resolved by the same slug rules the adapters use at runtime. The `finish` call
+ * is excluded for the same reason the agent excludes it: its output is the claim,
+ * not the evidence.
+ */
+async function urlsReachableBy(script: z.infer<typeof LlmScriptSchema>): Promise<Set<string>> {
+  const reachable = new Set<string>();
+
+  for (const scriptTurn of script.turns) {
+    for (const block of scriptTurn.content) {
+      if (block.type !== 'tool_use') continue;
+
+      if (block.name === 'web_search') {
+        const parsed = SearchArgsSchema.safeParse(block.input);
+        if (!parsed.success) continue;
+        const fixture =
+          (await tryReadFixture(`search/${slugify(parsed.data.query)}.json`)) ??
+          (await readJsonFixture(join(FIXTURES, 'search', 'default.json'), SearchFixtureSchema));
+        for (const result of fixture.results.slice(0, parsed.data.maxResults)) {
+          reachable.add(result.url);
+        }
+      }
+
+      if (block.name === 'http_get') {
+        const parsed = UrlArgsSchema.safeParse(block.input);
+        if (parsed.success && (await pageFixtureExists(parsed.data.url))) {
+          reachable.add(parsed.data.url);
+        }
+      }
+    }
+  }
+
+  return reachable;
+}
+
+const SearchArgsSchema = z.object({ query: z.string(), maxResults: z.number().default(5) });
+const UrlArgsSchema = z.object({ url: z.string() });
 const CitationsSchema = z.object({ citations: z.array(z.object({ url: z.string() })) });
+
+async function tryReadFixture(
+  relativePath: string,
+): Promise<z.infer<typeof SearchFixtureSchema> | undefined> {
+  try {
+    return await readJsonFixture(join(FIXTURES, relativePath), SearchFixtureSchema);
+  } catch {
+    return undefined;
+  }
+}
+
+async function pageFixtureExists(url: string): Promise<boolean> {
+  return (await jsonFilesIn('pages')).includes(`${slugifyUrl(url)}.json`);
+}
 
 function citedUrls(input: unknown): string[] {
   const parsed = CitationsSchema.safeParse(input);

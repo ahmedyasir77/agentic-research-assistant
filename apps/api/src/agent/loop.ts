@@ -28,7 +28,6 @@ export async function* runAgent(query: string, deps: AgentDeps): AgentRun {
     budgets,
     modelId: llm.modelId,
     clock,
-    ...(deps.emit === undefined ? {} : { emit: deps.emit }),
   });
 
   // One deadline for the whole run, handed to the model call and to every tool, so

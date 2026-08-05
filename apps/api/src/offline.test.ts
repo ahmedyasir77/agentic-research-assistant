@@ -54,7 +54,10 @@ describe('offline run for the recorded demo query', () => {
         expect(outcome.status, `${call.name} on step ${String(step)}`).toBe('ok');
         if (outcome.status !== 'ok') return;
 
-        collectUrls(outcome.output, seenUrls);
+        // Everything except `finish`, exactly as the agent does it: collecting
+        // from the answer would make the check below verify the answer against
+        // itself and pass whatever the fixture happened to claim.
+        if (call.name !== 'finish') collectUrls(outcome.output, seenUrls);
 
         if (call.name === 'finish') {
           // Parsed with the production schema, so the fixture is held to exactly
