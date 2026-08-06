@@ -1,0 +1,64 @@
+# Deploys to Azure Container Apps. Manual only: `workflow_dispatch` is the whole
+# trigger list, because an automatic deploy on every push to main is a promise this
+# project does not need to make.
+#
+# Authentication is OIDC — GitHub mints a short-lived token that Azure trusts via a
+# federated credential. There is no client secret in this repository and no service
+# principal password to rotate. Setup is in docs/ARCHITECTURE.md.
+name: Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      demoMode:
+        description: 'live calls the real APIs; offline replays fixtures and needs no keys'
+        type: choice
+        options: [offline, live]
+        default: offline
+      searchProvider:
+        description: 'tavily needs TAVILY_API_KEY; fixture needs nothing'
+        type: choice
+        options: [fixture, tavily]
+        default: fixture
+
+# Only one deploy at a time, and never cancelled halfway: an interrupted
+# `az deployment group create` leaves the resource group in a state nobody asked for.
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+permissions:
+  # Required for OIDC. `contents: read` is the only other thing this job needs.
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: production
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Log in to Azure
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      # The same script a developer runs. CI running a different deploy path from
+      # the one a human runs is how the human path rots.
+      - name: Deploy
+        env:
+          RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+          LOCATION: ${{ vars.AZURE_LOCATION }}
+          APP_NAME: ${{ vars.APP_NAME }}
+          ACR_NAME: ${{ vars.ACR_NAME }}
+          MODEL_ID: ${{ vars.MODEL_ID }}
+          DEMO_MODE: ${{ inputs.demoMode }}
+          SEARCH_PROVIDER: ${{ inputs.searchProvider }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
+        run: ./infra/deploy.sh

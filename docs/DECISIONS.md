@@ -629,3 +629,130 @@ guardrail it was meant to be rather than a routine event.
 Extracting `complete`, `fail` and `recordStep` into `agent/outcome.ts` while making
 this change brought `loop.ts` to 143 lines: the loop now decides *whether* to stop,
 and one other file does the bookkeeping of stopping.
+
+---
+
+## ADR-031 — One container: Express serves the React bundle
+
+**Context.** The UI is a static bundle and the API is a Node process. The textbook
+production answer is a CDN in front of object storage for the first and a container
+for the second. That is two things to deploy, two things to configure CORS between,
+and two things that can be at different versions during a rollout.
+
+**Decision.** In production, Express serves `apps/web/dist` from the same process
+that serves `/api`, via `http/static.ts`. `WEB_DIR` points at the bundle; when there
+is no bundle there — the development arrangement, where Vite serves the UI on its
+own port — the API mounts nothing and serves only JSON.
+
+**Consequences.** One image, one revision, one URL, no CORS, and the front end and
+back end cannot be at different versions because they ship as one artifact. The UI
+also gets whatever the API's ingress gets for free.
+
+The cost is honest and worth saying out loud in an interview: static bytes are being
+served by a Node process that could be doing something else, cache headers are hand
+written rather than a CDN's, and a UI-only change requires a full deploy. At this
+size none of that is measurable. At real traffic, the bundle moves to a CDN and this
+router is deleted — which is why it is one small file with no dependencies on the
+rest of the app.
+
+Two routing details are load-bearing. The static router is mounted **after** every
+API router, so no path the API owns can be answered with HTML. And the single-page
+fallback explicitly excludes `/api/`, because otherwise a fetch to a mistyped
+endpoint would receive `200` and an HTML page, and fail at `JSON.parse` with no clue
+why — instead of the `problem+json` 404 every other error in this app produces.
+
+---
+
+## ADR-032 — `pnpm deploy --legacy` for the runtime layer
+
+**Context.** The runtime image should carry the API's production dependencies and
+nothing else: no pnpm store, no devDependencies, no source, no test runner. `pnpm
+deploy` produces exactly that — a self-contained directory with a real
+`node_modules` and the workspace dependency (`@ara/shared`) copied in rather than
+symlinked out of a tree that will not exist.
+
+From pnpm 10, plain `pnpm deploy` refuses to run unless the workspace sets
+`inject-workspace-packages=true`, which changes how workspace packages are linked
+during ordinary development too.
+
+**Decision.** `pnpm deploy --legacy --prod`, and `"files": ["dist"]` in the API's
+`package.json` so the copy excludes source, tests and coverage output.
+
+**Consequences.** The development loop is untouched — `pnpm build:shared` still
+writes a `dist` that the API sees immediately, which injected packages would have
+complicated for no gain here. The flag is a deprecation risk, and the mitigation is
+that CI builds the real image on every pull request, so the day it stops working is
+the day a PR goes red rather than the day a deploy fails.
+
+---
+
+## ADR-033 — `.dockerignore` at the repository root, not beside the Dockerfile
+
+**Context.** The layout puts the Dockerfile in `infra/`, so the ignore file "should"
+live there too. It cannot. Docker reads `.dockerignore` from the **build context**
+root, and the context is the repository root because the Dockerfile copies from
+`packages/` and `apps/`. BuildKit will also read `infra/Dockerfile.dockerignore` —
+but `az acr build`, which is how `deploy.sh` builds the image without a local Docker
+daemon, will not.
+
+**Decision.** One `.dockerignore` at the repository root, with a comment at the top
+saying why it is not in `infra/`.
+
+**Consequences.** Every builder honours it, including the one the deploy script
+actually uses. The alternative would have been a file that looks correct, sits in the
+tidy location, and silently does nothing — uploading `node_modules` on every build
+and leaving someone to work out why the context is 400 MB. A misplaced ignore file
+fails quietly, which is the worst way for infrastructure to fail.
+
+---
+
+## ADR-034 — Registry credentials as a container app secret, not a managed identity
+
+**Context.** The container app has to authenticate to ACR to pull its image. The
+better answer is a system-assigned managed identity with an `AcrPull` role
+assignment: no password exists, so no password can leak or need rotating.
+
+It also needs the identity to exist before the role assignment, and the role
+assignment to exist before the first image pull — a two-phase deployment — and the
+deploying principal needs `User Access Administrator` or `Owner` to create a role
+assignment at all, which `Contributor` is not.
+
+**Decision.** The ACR admin credential, stored as a container app **secret** and
+referenced by `passwordSecretRef`. `deploy.sh` reads it from `az acr credential
+show` and writes it into a `chmod 600` parameter file rather than passing it on a
+command line, where it would land in shell history and the process table.
+
+**Consequences.** One `az deployment group create` deploys the whole thing, from a
+principal with only `Contributor`, and it is idempotent. The API keys are handled the
+same way — `secretRef`, never a plain environment value — so nothing sensitive
+appears in `az containerapp show` or a portal blade.
+
+What this costs is a long-lived shared credential that rotation has to remember. It
+is the first item on the deployment half of "what I'd do next", and the honest
+framing in an interview is: I know what the right answer is, I know exactly why I did
+not do it, and the fix is a role assignment plus a second deployment phase.
+
+---
+
+## ADR-035 — `minmax(0, 1fr)` on the tool-call grid
+
+**Context.** Taking the README screenshot showed the page scrolling sideways.
+Measured rather than guessed: `document.body.scrollWidth` was **9122** against a
+1100-pixel viewport. The cause was the `finish` call's one-line argument summary —
+the whole answer, serialised — in a grid track sized by the implicit `auto`, which
+has a min-content floor. The track stretched to fit the text, the card stretched with
+it, and the ellipsis on `.call__args` could never engage because nothing was ever too
+narrow.
+
+**Decision.** `grid-template-columns: minmax(0, 1fr)` on `.calls`.
+
+**Consequences.** The summary truncates as it was always meant to, the timing stays
+inside the card, and the page fits its viewport. This is the second bug of exactly
+this shape — the first was the expanded payload needing `pre-wrap` — and both share a
+root cause worth naming: **a model writes text of a length no designer would type.**
+Anything that renders model output needs a stated wrapping or truncation behaviour,
+and "it looked fine with the fixture I had" is not one.
+
+It is also the second time a bug was found by looking at the running app rather than
+by running the tests. jsdom has no layout engine, so no unit test in this repository
+could have caught it. The check that did catch it was a screenshot.

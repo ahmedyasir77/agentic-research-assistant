@@ -34,6 +34,10 @@ const EnvSchema = z
     // Where recorded fixtures live. Defaults to the repo's fixtures/ directory,
     // resolved from the module's own path; set explicitly in a container.
     FIXTURES_DIR: z.string().min(1).optional(),
+
+    // Where the built React bundle lives. Defaults to apps/web/dist; when there is
+    // no bundle there the API serves only JSON, which is the dev arrangement.
+    WEB_DIR: z.string().min(1).optional(),
   })
   .superRefine((env, ctx) => {
     if (env.DEMO_MODE === 'live' && env.ANTHROPIC_API_KEY === undefined) {
@@ -76,6 +80,7 @@ export interface Config {
   };
   readonly rateLimitPerMin: number;
   readonly fixturesDir?: string;
+  readonly webDir?: string;
 }
 
 export interface ConfigIssue {
@@ -127,6 +132,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
     }),
     rateLimitPerMin: raw.RATE_LIMIT_PER_MIN,
     ...(raw.FIXTURES_DIR === undefined ? {} : { fixturesDir: raw.FIXTURES_DIR }),
+    ...(raw.WEB_DIR === undefined ? {} : { webDir: raw.WEB_DIR }),
   });
 }
 

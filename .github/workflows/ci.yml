@@ -1,0 +1,89 @@
+# One job, in the order that fails fastest: lint before typecheck before tests
+# before builds. A formatting mistake should not cost a docker build to find out.
+#
+# Nothing here needs a secret. The test suite runs with no network and no API key,
+# which is the same promise `pnpm demo` makes to a laptop on conference wifi.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# A new push to a branch makes the previous run irrelevant. main is exempt: those
+# runs are the record of what was green.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v5
+        with:
+          # Read from .nvmrc so CI and a developer's machine cannot disagree
+          # about the Node version. `cache: pnpm` keys on the lockfile.
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      # The shared contracts compile to dist before anything can typecheck
+      # against them, so this is the first real step rather than part of `build`.
+      - name: Build shared contracts
+        run: pnpm build:shared
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Format check
+        run: pnpm format:check
+
+      - name: Typecheck
+        run: pnpm -r typecheck
+
+      - name: Test
+        run: pnpm -r test:coverage
+
+      - name: Build
+        run: pnpm -r build
+
+      # Builds the real image, from the real Dockerfile, on every pull request —
+      # so a broken Dockerfile is caught here rather than during a deploy. The
+      # image is not pushed; CI has no registry credentials by design.
+      - name: Build container image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: infra/Dockerfile
+          push: false
+          load: true
+          tags: ara:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Proves the image serves the app, not just that it builds: boot it in
+      # offline mode, wait for the health endpoint, and ask for the UI.
+      - name: Smoke test the image
+        run: |
+          docker run -d --name ara -p 8080:8080 ara:${{ github.sha }}
+          for _ in $(seq 1 30); do
+            curl -fsS localhost:8080/healthz >/dev/null && break
+            sleep 1
+          done
+          curl -fsS localhost:8080/healthz
+          curl -fsS localhost:8080/ | grep -q '<div id="root">'
+          docker logs ara
+          docker rm -f ara

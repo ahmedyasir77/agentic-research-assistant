@@ -1,0 +1,37 @@
+# The build context for infra/Dockerfile.
+#
+# This file lives at the repository root rather than beside the Dockerfile because
+# that is the only location every builder honours. BuildKit would also read
+# `infra/Dockerfile.dockerignore`, but `az acr build` — which is how deploy.sh
+# builds the image, with no local Docker daemon — would not, and a context
+# containing node_modules is a slow upload and a confusing cache. See ADR-033.
+#
+# Everything below is either rebuilt inside the image or has no business in it.
+
+node_modules
+**/node_modules
+
+# Rebuilt by `pnpm build` in the build stage. Copying a host build in would ship
+# whatever happened to be on someone's laptop.
+dist
+**/dist
+*.tsbuildinfo
+**/*.tsbuildinfo
+coverage
+**/coverage
+
+# Secrets. `.env.example` is deliberately not excluded — it documents the
+# variables and contains no values.
+.env
+.env.*
+!.env.example
+
+.git
+.github
+.claude
+docs
+infra
+README.md
+
+.DS_Store
+*.log

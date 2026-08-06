@@ -6,6 +6,7 @@ import { shutdown } from './http/shutdown.ts';
 import { createLogger } from './platform/logger.ts';
 import { registerDefaultMetrics } from './platform/metrics.ts';
 import { RunStore } from './runs/store.ts';
+import { findWebBundle } from './http/static.ts';
 
 // The boot path, in order: parse config, build a logger, compose the runtime for
 // the configured mode, mount the API, listen. Everything below this file receives
@@ -17,6 +18,7 @@ registerDefaultMetrics();
 
 const runtime = createAgentRuntime({ config, logger });
 const store = new RunStore();
+const webDir = findWebBundle(config.webDir);
 
 const { app, lifecycle } = createApi({
   runtime,
@@ -25,6 +27,7 @@ const { app, lifecycle } = createApi({
   logger,
   rateLimitPerMin: config.rateLimitPerMin,
   demoMode: config.demoMode,
+  ...(webDir === undefined ? {} : { webDir }),
 });
 
 const server = app.listen(config.port, () => {
@@ -34,6 +37,9 @@ const server = app.listen(config.port, () => {
       demoMode: config.demoMode,
       modelId: runtime.modelId,
       tools: runtime.tools.names,
+      // Says out loud whether this process is serving the UI, so "the API is up
+      // but the page is blank" is answered by the first line of the log.
+      webDir: webDir ?? null,
     },
     'listening',
   );

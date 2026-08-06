@@ -11,6 +11,7 @@ import { createConfigRouter } from './routes/config.ts';
 import { createOperationsRouter } from './routes/operations.ts';
 import { createRunsRouter } from './routes/runs.ts';
 import { createToolsRouter } from './routes/tools.ts';
+import { createWebRouter } from './static.ts';
 
 /**
  * A query is capped at 500 characters by the schema, so a body larger than this is
@@ -26,6 +27,8 @@ export interface ServerDeps {
   readonly rateLimitPerMin: number;
   readonly demoMode: 'live' | 'offline';
   readonly lifecycle?: Lifecycle;
+  /** The built React bundle, when there is one. Absent in dev and in every test. */
+  readonly webDir?: string;
 }
 
 export interface Api {
@@ -68,6 +71,9 @@ export function createApi(deps: ServerDeps): Api {
       rateLimitPerMin: deps.rateLimitPerMin,
     }),
   );
+
+  // Last, so that every route the API owns is matched before the UI's catch-all.
+  if (deps.webDir !== undefined) app.use(createWebRouter(deps.webDir));
 
   app.use(notFoundHandler);
   app.use(errorHandler);

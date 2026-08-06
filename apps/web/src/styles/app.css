@@ -269,9 +269,15 @@ body {
 
 /* ---- tool calls ---------------------------------------------------------- */
 
+/* `minmax(0, 1fr)`, not the implicit `auto`: a grid track sized `auto` has a
+   min-content floor, so a card wide enough to hold `finish`'s one-line answer
+   summary stretched the track — and with it the page — to nine thousand pixels.
+   The ellipsis on .call__args could never engage because nothing was ever too
+   narrow. Measured, not guessed: body scrollWidth was 9122 against a 1100 viewport. */
 .calls {
   margin-top: calc(var(--step) * 2);
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--step);
 }
 
@@ -390,6 +396,12 @@ body {
 
 .panel--failed .panel__title {
   color: var(--flag);
+}
+
+/* A failure panel has a second heading — "what it had so far" — and without this it
+   sits flush against the paragraph above, reading as part of it. */
+.panel__title:not(:first-child) {
+  margin-top: calc(var(--step) * 3);
 }
 
 .citation {
