@@ -1,10 +1,6 @@
-import type { AgentEvent, RunFailureReason, RunTrace } from '@ara/shared';
-
 import { assistantText, toolUses, type LlmMessage, type LlmResponse } from '../llm/port.ts';
 import { withRetry } from '../platform/retry.ts';
-import { FinishPayloadSchema } from '../tools/finish.ts';
-import type { ToolInvocation } from '../tools/registry.ts';
-import { reviewCitations } from './citations.ts';
+import { complete, fail, recordStep } from './outcome.ts';
 import { checkBudget, toRunBudgets } from './policy.ts';
 import { buildSystemPrompt, FINISH_NUDGE } from './prompt.ts';
 import { RunRecorder } from './recorder.ts';
@@ -75,7 +71,7 @@ export async function* runAgent(query: string, deps: AgentDeps): AgentRun {
         );
       } catch (error) {
         logger.error({ runId: deps.runId, step, err: error }, 'model call failed');
-        return yield* fail(recorder, 'llm_error', describe(error), lastText);
+        return yield* fail(recorder, 'llm_error', describeError(error), lastText);
       }
       recorder.addUsage(response.usage);
 
@@ -87,18 +83,29 @@ export async function* runAgent(query: string, deps: AgentDeps): AgentRun {
 
       const requested = toolUses(response);
       if (requested.length === 0) {
+        // A turn that called nothing still spent a model call and a step, so it
+        // belongs in the trace like any other. Leaving it out made the trace
+        // disagree with the event stream about how long a run was.
+        recordStep(recorder, clock, step, stepStartedAtMs, text, [], response.usage);
+
         // Plain prose is not an answer. Correct it once; a model that ignores the
         // correction is looping, and looping is what the rails exist to stop.
         if (nudges < policy.maxNudges) {
           nudges += 1;
-          recorder.addWarning({
-            kind: 'missing_finish_call',
-            message: 'The model answered without calling a tool and was asked to use finish.',
-          });
           messages.push({ role: 'assistant', content: response.content });
           messages.push({ role: 'user', content: [{ type: 'text', text: FINISH_NUDGE }] });
           continue;
         }
+
+        // Warned about only once the correction has failed. A model that answers
+        // in prose and then does as it is told has cost a step, which the trace
+        // now shows — it has not made the answer any less trustworthy, and that is
+        // what a warning is for.
+        recorder.addWarning({
+          kind: 'missing_finish_call',
+          message:
+            'The model gave its answer as prose instead of calling finish, so its citations were never checked.',
+        });
         return yield* fail(
           recorder,
           'no_tool_call',
@@ -120,16 +127,7 @@ export async function* runAgent(query: string, deps: AgentDeps): AgentRun {
       messages.push({ role: 'assistant', content: response.content });
       messages.push({ role: 'user', content: executed.results });
 
-      const endedAtMs = clock.now();
-      recorder.addStep({
-        index: step,
-        startedAt: new Date(stepStartedAtMs).toISOString(),
-        endedAt: new Date(endedAtMs).toISOString(),
-        durationMs: endedAtMs - stepStartedAtMs,
-        text,
-        toolCalls: executed.records,
-        usage: response.usage,
-      });
+      recordStep(recorder, clock, step, stepStartedAtMs, text, executed.records, response.usage);
 
       if (executed.finished !== undefined) {
         return yield* complete(recorder, executed.finished, observedUrls);
@@ -140,51 +138,6 @@ export async function* runAgent(query: string, deps: AgentDeps): AgentRun {
   }
 }
 
-function* complete(
-  recorder: RunRecorder,
-  finished: ToolInvocation,
-  observedUrls: ReadonlySet<string>,
-): Generator<AgentEvent, RunTrace, void> {
-  const payload = FinishPayloadSchema.parse(
-    finished.outcome.status === 'ok' ? finished.outcome.output : {},
-  );
-
-  // The anti-hallucination check, applied before the answer is ever shown.
-  const review = reviewCitations(payload.citations, observedUrls);
-  for (const warning of review.warnings) recorder.addWarning(warning);
-
-  yield recorder.event({ type: 'answer.delta', text: payload.answer });
-  yield recorder.event({
-    type: 'run.completed',
-    ...recorder.summary,
-    answer: payload.answer,
-    citations: [...review.citations],
-    warnings: [...recorder.warnings],
-  });
-
-  return recorder.succeeded(payload.answer, review.citations);
-}
-
-function* fail(
-  recorder: RunRecorder,
-  reason: RunFailureReason,
-  message: string | undefined,
-  partialAnswer: string,
-): Generator<AgentEvent, RunTrace, void> {
-  const detail = message ?? 'The run stopped.';
-
-  yield recorder.event({
-    type: 'run.failed',
-    ...recorder.summary,
-    reason,
-    message: detail,
-    ...(partialAnswer === '' ? {} : { partialAnswer }),
-    warnings: [...recorder.warnings],
-  });
-
-  return recorder.failed(reason, detail, partialAnswer);
-}
-
-function describe(error: unknown): string {
+function describeError(error: unknown): string {
   return error instanceof Error ? error.message : 'The model call failed.';
 }

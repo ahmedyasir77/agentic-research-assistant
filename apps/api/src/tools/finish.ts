@@ -15,9 +15,15 @@ const InputSchema = z.object({
   citations: z
     .array(CitationSchema)
     .max(20)
+    // Optional, because an answer can legitimately rest on no source: a run that
+    // only did arithmetic has nothing to cite. Making it required cost a real run
+    // four steps — the model kept sending a correct answer with no citations
+    // field and kept being rejected, and the run failed with the answer in hand.
+    .default([])
     .describe(
       'The sources the answer relies on. Every url must be one a tool returned during this run — ' +
-        'urls that were not will be stripped from the answer and flagged.',
+        'urls that were not are flagged as unverified. Omit it, or pass an empty array, when the ' +
+        'answer rests on no source.',
     ),
 });
 

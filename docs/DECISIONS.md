@@ -505,3 +505,127 @@ different feature with different requirements. `pnpm demo` remains the way to
 choose the mode, and the badge tells you which one you got. The version field earns
 the endpoint on its own: a browser tab left open across a deploy can now say
 "reload" rather than quietly dropping events it does not understand.
+
+---
+
+## ADR-026 — The vendor adapters are Axios, not vendor SDKs
+
+**Context.** M7 needs the Anthropic Messages API and the Tavily search API.
+`@anthropic-ai/sdk` is the obvious choice for the first, and it is outside the
+fixed stack in §2.
+
+**Decision.** Both adapters are built on Axios through a `JsonPoster` port —
+`platform/jsonPost.ts` — with the wire shapes parsed by Zod at the boundary. No
+new dependency.
+
+**Consequences.** The retry, timeout and abort behaviour comes from the platform
+primitives already written in M2 rather than from a second, differently-configured
+mechanism inside an SDK — one backoff policy, one place to change it. The vendor
+types stop at one file each, which is what the `LlmClient` and `SearchProvider`
+ports were for. The cost is real: the request and response shapes are hand-mapped
+and hand-validated, so a change to the Messages API is a change here rather than a
+dependency bump, and none of the SDK's conveniences (streaming helpers, the tool
+runner, typed betas) are available. That trade is worth it for a project whose
+point is that the seams are visible, and it keeps `pnpm why` honest. Revisit if
+streaming responses are added — that is where writing it by hand stops being cheap.
+
+---
+
+## ADR-027 — Blocks the adapter does not understand are carried, not dropped
+
+**Context.** Extended thinking is on by default on current models. A response
+comes back containing `thinking` blocks, and the API **rejects the next turn** if
+those blocks were dropped or edited on the way back. The port's normalised block
+union knew only `text`, `tool_use` and `tool_result`, so a live multi-turn tool
+loop would have failed on step two.
+
+**Decision.** One more block in the port: `{ type: 'opaque', vendor }`. The adapter
+maps any vendor block it does not recognise into it verbatim, and maps it straight
+back out when serialising the conversation. Nothing above the port ever looks
+inside — `assistantText` and `toolUses` filter by type and simply skip it.
+
+**Consequences.** Thinking round-trips byte-for-byte, and so does any block type a
+vendor adds later: an unfamiliar block cannot take a run down. The port stays
+vendor-neutral in the sense that matters — nothing above it knows what the payload
+means — while being honest that some of the conversation is not ours to interpret.
+The alternative, sending `thinking: {type: 'disabled'}`, was rejected on two
+counts: it is model-specific (rejected outright on some models, effort-gated on
+others) and `MODEL_ID` is a deployment choice, so the adapter must work for
+whatever it is set to; and turning off reasoning on a reasoning task to avoid
+writing fifteen lines is the wrong trade. For the same reason no `thinking`
+parameter is sent at all — each model is left to its own default.
+
+---
+
+## ADR-028 — A wrapped provider error is still classifiable
+
+**Context.** The adapters wrap provider failures in `LlmError` and
+`SearchProviderError` so the layers above see one type. But `withRetry` decides
+what to retry by reading `status` and `Retry-After` off the error, and wrapping hid
+both — every provider 429 would have been treated as permanent.
+
+**Decision.** The adapters put the provider's status on the error they raise, and
+`platform/transient.ts` looks one level down into `cause` when the error it is
+handed carries no facts of its own.
+
+**Consequences.** A 429 or a 503 from either provider is retried with the existing
+full-jitter backoff and honours `Retry-After`; a 400 fails once, immediately.
+Wrapping stays free — an adapter can raise its own error type without silently
+disabling the retry policy — and both adapters have a test asserting exactly that
+distinction, because it is the kind of thing that breaks quietly.
+
+---
+
+## ADR-029 — `finish` accepts an answer with no citations
+
+**Context.** `citations` was a required field on the `finish` tool. The first live
+run to ask a question answerable by arithmetic — "how many times more strongly does
+air scatter 450nm light than 700nm light" — produced the correct answer, called
+`finish` without a `citations` key, was rejected for invalid arguments, and did it
+again four times before the run ended as `no_tool_call` with the answer in hand.
+
+**Decision.** `citations` defaults to `[]`, and the description tells the model to
+omit it when the answer rests on no source.
+
+**Consequences.** An answer that needed no sources can now be given. The
+anti-hallucination check is untouched — it verifies the claims that are made, and
+an empty list makes no claims. Requiring the field never forced a real citation
+anyway: `[]` always satisfied it, so the requirement only ever caught models that
+omitted the key rather than models that skipped the work.
+
+Two things are worth keeping from how this was found. The guardrails behaved
+exactly as designed under real conditions — invalid arguments came back as a
+readable tool error, the model got to retry, and the nudge-then-stop rule ended the
+run instead of looping forever. And no offline test could have caught it, because
+the recorded fixtures always send a well-formed `finish`: a schema is a contract
+with a model, and only a real model tells you whether the contract is reasonable.
+
+---
+
+## ADR-030 — A turn that called no tool is still a step, and is not a warning
+
+**Context.** Two things showed up in live use that no offline test had. Asking
+"what is the capital of France?" made the model answer in prose — reasonably, since
+no research was needed — which triggered the nudge. The run then completed
+correctly, but reported `steps: 1` in its trace while the event stream had emitted
+two `agent.step.started` events, and the UI showed the successful run under the
+heading "The run flagged an issue".
+
+**Decision.** Three changes. The nudged turn is recorded with `addStep` like any
+other, with its text and an empty tool-call list. The `missing_finish_call` warning
+moves from the nudge to the failure that follows an ignored nudge. And the system
+prompt now says that `finish` is required even when the question needed no
+research.
+
+**Consequences.** The trace and the event stream agree about how long a run was —
+they describe the same run and a reader will compare them, so a disagreement is a
+bug however harmless it looks. A warning now means one thing: *the answer is less
+trustworthy than it appears*. A model that was corrected once and complied cost a
+step, which the trace shows plainly; it did not change the answer, so it is not a
+warning. After the prompt change the same question goes straight to `finish` in a
+single step and never triggers the nudge at all — the nudge is back to being the
+guardrail it was meant to be rather than a routine event.
+
+Extracting `complete`, `fail` and `recordStep` into `agent/outcome.ts` while making
+this change brought `loop.ts` to 143 lines: the loop now decides *whether* to stop,
+and one other file does the bookkeeping of stopping.

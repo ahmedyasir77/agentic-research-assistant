@@ -23,6 +23,8 @@ export function buildSystemPrompt(policy: AgentPolicy): string {
     'How to finish:',
     '- Call the finish tool. It is the only way to end a run — plain prose is not an answer,',
     '  and a turn without a tool call wastes a step.',
+    '- This holds even when the question needed no research. Answer inside finish, with an empty',
+    '  citations list, rather than replying directly.',
     '- Cite only URLs that appeared in a tool result during this run. Citations are checked',
     '  against what the tools actually returned, and anything else is flagged as unverified.',
     '- Mark each claim with its bracketed citation id, like [1].',

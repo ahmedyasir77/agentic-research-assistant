@@ -34,4 +34,23 @@ describe('estimateCostUsd', () => {
   it('is zero for a run that used no tokens', () => {
     expect(estimateCostUsd('claude-opus-5', { inputTokens: 0, outputTokens: 0 })).toBe(0);
   });
+
+  it('prices a dated model id the same as its bare form', () => {
+    // Both are valid in MODEL_ID. A live run against
+    // `claude-haiku-4-5-20251001` reported five times its real cost before this,
+    // because only the bare id was in the table.
+    const usage = { inputTokens: 15_448, outputTokens: 962 };
+
+    expect(estimateCostUsd('claude-haiku-4-5-20251001', usage)).toBe(
+      estimateCostUsd('claude-haiku-4-5', usage),
+    );
+    expect(estimateCostUsd('claude-haiku-4-5-20251001', usage)).toBeCloseTo(0.0203, 4);
+    expect(isPricingKnown('claude-haiku-4-5-20251001')).toBe(true);
+  });
+
+  it('does not mistake a version number for a date suffix', () => {
+    // `claude-opus-4-8` must not be mangled into `claude-opus`.
+    expect(isPricingKnown('claude-opus-4-8')).toBe(true);
+    expect(estimateCostUsd('claude-opus-4-8', { inputTokens: 1_000_000, outputTokens: 0 })).toBe(5);
+  });
 });

@@ -26,12 +26,22 @@ const PRICING: Readonly<Record<string, ModelPricing>> = {
 const FALLBACK: ModelPricing = { inputPerMillionUsd: 5, outputPerMillionUsd: 25 };
 
 export function estimateCostUsd(modelId: string, usage: TokenUsage): number {
-  const pricing = PRICING[modelId] ?? FALLBACK;
+  const pricing = pricingFor(modelId) ?? FALLBACK;
   const input = (usage.inputTokens / 1_000_000) * pricing.inputPerMillionUsd;
   const output = (usage.outputTokens / 1_000_000) * pricing.outputPerMillionUsd;
   return input + output;
 }
 
 export function isPricingKnown(modelId: string): boolean {
-  return modelId in PRICING;
+  return pricingFor(modelId) !== undefined;
+}
+
+/**
+ * Model ids are published both bare (`claude-haiku-4-5`) and dated
+ * (`claude-haiku-4-5-20251001`), and both are valid in `MODEL_ID`. Matching only
+ * the exact string meant a dated id fell through to the fallback tier — a real
+ * live run against Haiku reported a cost five times its actual one.
+ */
+function pricingFor(modelId: string): ModelPricing | undefined {
+  return PRICING[modelId] ?? PRICING[modelId.replace(/-\d{8}$/u, '')];
 }

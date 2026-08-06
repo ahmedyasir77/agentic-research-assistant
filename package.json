@@ -15,6 +15,7 @@
     "test:coverage": "pnpm build:shared && pnpm -r test:coverage",
     "dev": "pnpm build:shared && pnpm -r --parallel dev",
     "demo": "pnpm build:shared && pnpm --filter @ara/api demo",
+    "live": "pnpm build:shared && pnpm --filter @ara/api live",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",

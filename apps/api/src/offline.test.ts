@@ -161,17 +161,34 @@ describe('offline run for an unscripted query', () => {
   });
 });
 
-describe('live mode without its adapter', () => {
-  it('refuses rather than quietly serving fixtures', async () => {
-    const liveConfig = loadConfig({
-      DEMO_MODE: 'live',
-      ANTHROPIC_API_KEY: 'sk-ant-test',
-      SEARCH_PROVIDER: 'fixture',
-      LOG_LEVEL: 'silent',
-    });
+describe('live mode', () => {
+  const liveConfig = loadConfig({
+    DEMO_MODE: 'live',
+    ANTHROPIC_API_KEY: 'sk-ant-test',
+    MODEL_ID: 'claude-sonnet-5',
+    SEARCH_PROVIDER: 'fixture',
+    LOG_LEVEL: 'silent',
+  });
+
+  it('builds a real model client rather than quietly serving fixtures', async () => {
     const live = createAgentRuntime({ config: liveConfig, logger: silentLogger });
 
-    await expect(live.llmFor('anything')).rejects.toThrow(/M7/u);
+    const llm = await live.llmFor('anything');
+
+    // The model comes from MODEL_ID, so switching models is a deploy-time change
+    // and never a code change.
+    expect(llm.modelId).toBe('claude-sonnet-5');
+    expect(live.modelId).toBe('claude-sonnet-5');
+  });
+
+  it('does not reach the network just by being composed', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+    const live = createAgentRuntime({ config: liveConfig, logger: silentLogger });
+
+    await live.llmFor('anything');
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+    fetchSpy.mockRestore();
   });
 });
 

@@ -33,10 +33,27 @@ export const ToolResultBlockSchema = z.object({
 
 export type ToolUseBlock = z.infer<typeof ToolUseBlockSchema>;
 
+/**
+ * Something the model produced that we neither read nor understand — an extended
+ * thinking block, most often.
+ *
+ * It is carried through verbatim because it has to go back unchanged on the next
+ * turn: a model with thinking enabled rejects a conversation whose thinking blocks
+ * have been dropped or edited. Keeping it opaque means the port stays
+ * vendor-neutral — nothing above this line knows what is inside, only that it
+ * belongs to the conversation.
+ */
+export const OpaqueBlockSchema = z.object({
+  type: z.literal('opaque'),
+  vendor: JsonValueSchema,
+});
+export type OpaqueBlock = z.infer<typeof OpaqueBlockSchema>;
+
 /** What a model may say back to us. */
 export const AssistantBlockSchema = z.discriminatedUnion('type', [
   TextBlockSchema,
   ToolUseBlockSchema,
+  OpaqueBlockSchema,
 ]);
 export type AssistantBlock = z.infer<typeof AssistantBlockSchema>;
 
@@ -45,6 +62,7 @@ export const ContentBlockSchema = z.discriminatedUnion('type', [
   TextBlockSchema,
   ToolUseBlockSchema,
   ToolResultBlockSchema,
+  OpaqueBlockSchema,
 ]);
 export type ContentBlock = z.infer<typeof ContentBlockSchema>;
 
@@ -88,9 +106,17 @@ export interface LlmClient {
 
 /** A failure from the model provider that the run cannot recover from. */
 export class LlmError extends Error {
-  constructor(message: string, options?: { cause?: unknown }) {
+  /**
+   * The provider's HTTP status, when there was one. Carried on the error so
+   * `platform/transient.ts` can tell a 429 worth retrying from a 400 that will
+   * fail identically three times.
+   */
+  readonly status: number | undefined;
+
+  constructor(message: string, options?: { cause?: unknown; status?: number }) {
     super(message, options);
     this.name = 'LlmError';
+    this.status = options?.status;
   }
 }
 

@@ -262,6 +262,9 @@ body {
   font-family: var(--voice);
   font-size: 0.95rem;
   line-height: 1.65;
+  /* A bare URL written into an answer is long enough to push the page sideways
+     on a phone. `break-word` only breaks when the alternative is overflowing. */
+  overflow-wrap: break-word;
 }
 
 /* ---- tool calls ---------------------------------------------------------- */
@@ -338,6 +341,12 @@ body {
   font-size: 0.85rem;
 }
 
+/* Wraps rather than scrolls sideways. `finish` serialises a whole prose answer
+   into one JSON string, so `white-space: pre` made reading it a horizontal drag
+   across several screens. `pre-wrap` keeps the indentation that makes the JSON
+   structure legible; `anywhere` breaks the long unbroken runs — URLs, ids — that
+   wrapping alone cannot. `overflow-x` stays as the backstop for whatever neither
+   of those can break. */
 .payload {
   margin: 0;
   padding: 0.6em 0.7em;
@@ -345,7 +354,8 @@ body {
   overflow-x: auto;
   font-size: 0.78rem;
   line-height: 1.5;
-  white-space: pre;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .payload__label {

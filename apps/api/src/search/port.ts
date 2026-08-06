@@ -27,8 +27,12 @@ export interface SearchProvider {
 
 /** Raised when a provider fails in a way the agent should be told about. */
 export class SearchProviderError extends Error {
-  constructor(provider: string, message: string, options?: { cause?: unknown }) {
+  /** The provider's HTTP status, so `withRetry` can tell a 429 from a 400. */
+  readonly status: number | undefined;
+
+  constructor(provider: string, message: string, options?: { cause?: unknown; status?: number }) {
     super(`${provider} search failed: ${message}`, options);
     this.name = 'SearchProviderError';
+    this.status = options?.status;
   }
 }

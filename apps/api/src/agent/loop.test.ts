@@ -202,8 +202,15 @@ describe('scenario 2 — malformed tool arguments', () => {
 
   it('treats a finish call with invalid arguments as unfinished', async () => {
     const agentDeps = deps([
-      // No citations array at all — the finish schema rejects it.
-      turn.toolCall([{ id: 'c1', name: 'finish', input: { answer: 'No citations field.' } }]),
+      // A citation whose url is not a url. Omitting the citations array entirely
+      // is deliberately *not* an error any more — see ADR-029.
+      turn.toolCall([
+        {
+          id: 'c1',
+          name: 'finish',
+          input: { answer: 'Bad citation.', citations: [{ id: 1, url: 'nope', title: 'x' }] },
+        },
+      ]),
       finishCall('Second attempt, properly formed.', []),
     ]);
 
@@ -308,6 +315,38 @@ describe('scenario 5 — the model will not call finish', () => {
 
     const { trace } = await run('why is the sky blue', agentDeps);
     expect(trace.status).toBe('succeeded');
+  });
+
+  it('does not warn about a nudge the model took', async () => {
+    // No citations, so the only warning this run could produce is the nudge one.
+    const agentDeps = deps([
+      turn.text('The sky is blue because of scattering.'),
+      finishCall('The sky is blue because of scattering.', []),
+    ]);
+
+    const { trace } = await run('why is the sky blue', agentDeps);
+
+    // A warning means the answer is less trustworthy than it looks. A model that
+    // was corrected once and complied cost a step — which the trace shows — and
+    // changed nothing about the answer.
+    expect(trace.warnings).toStrictEqual([]);
+  });
+
+  it('counts the nudged turn as a step, in the trace as well as the stream', async () => {
+    const agentDeps = deps([
+      turn.text('The sky is blue because of scattering.'),
+      finishCall('The sky is blue because of scattering. [1]', [SOURCE]),
+    ]);
+
+    const { events, trace } = await run('why is the sky blue', agentDeps);
+
+    // The trace and the event stream have to agree about how long a run was: they
+    // are the same run, and a reader will compare them.
+    const started = events.filter((event) => event.type === 'agent.step.started');
+    expect(trace.steps).toHaveLength(started.length);
+    expect(trace.steps).toHaveLength(2);
+    expect(trace.steps[0]?.toolCalls).toStrictEqual([]);
+    expect(trace.steps[0]?.text).toBe('The sky is blue because of scattering.');
   });
 });
 

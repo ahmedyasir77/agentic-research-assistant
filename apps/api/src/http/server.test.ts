@@ -35,21 +35,36 @@ const config = loadConfig({
 });
 const offlineRuntime = createAgentRuntime({ config, logger: silentLogger });
 
-/** A runtime whose model takes its time, so a run is observably in flight. */
-function slowRuntime(delayMs: number): AgentRuntime {
+/**
+ * A runtime whose model will not answer until the test says so, which is how a run
+ * is held in flight without depending on a timer. An earlier version used a delay
+ * and flaked: a recorded run finishes in single-digit milliseconds, so "still
+ * running" was a race the test lost about one time in five.
+ */
+function gatedRuntime(): { runtime: AgentRuntime; release: () => void } {
+  let open = (): void => undefined;
+  const gate = new Promise<void>((resolve) => {
+    open = resolve;
+  });
+
   return {
-    tools: offlineRuntime.tools,
-    modelId: offlineRuntime.modelId,
-    llmFor: async (query) => {
-      const inner = await offlineRuntime.llmFor(query);
-      const slow: LlmClient = {
-        modelId: inner.modelId,
-        complete: async (llmRequest) => {
-          await new Promise((resolve) => setTimeout(resolve, delayMs));
-          return inner.complete(llmRequest);
-        },
-      };
-      return slow;
+    release: () => {
+      open();
+    },
+    runtime: {
+      tools: offlineRuntime.tools,
+      modelId: offlineRuntime.modelId,
+      llmFor: async (query) => {
+        const inner = await offlineRuntime.llmFor(query);
+        const gated: LlmClient = {
+          modelId: inner.modelId,
+          complete: async (llmRequest) => {
+            await gate;
+            return inner.complete(llmRequest);
+          },
+        };
+        return gated;
+      },
     },
   };
 }
@@ -156,13 +171,16 @@ describe('POST /api/runs then subscribe', () => {
   });
 
   it('delivers events to a client that subscribed while the run was still going', async () => {
-    const { app, store } = buildApi({ runtime: slowRuntime(15) });
+    const { runtime, release } = gatedRuntime();
+    const { app, store } = buildApi({ runtime });
     const { runId } = await createRun(app);
 
-    // Subscribed before the run could have finished — the response only ends when
-    // the run does, so this asserts live delivery, not replay.
+    // Subscribed while the model is still held at the gate, so every event this
+    // client receives arrives live. Replay could not have produced them.
     expect(store.get(runId)?.status).toBe('running');
-    const stream = await request(app).get(`/api/runs/${runId}/events`).expect(200);
+    const streaming = request(app).get(`/api/runs/${runId}/events`).expect(200);
+    release();
+    const stream = await streaming;
 
     expect(parseSse(stream.text).at(-1)?.type).toBe('run.completed');
   });
@@ -189,7 +207,8 @@ describe('GET /api/runs/:runId', () => {
   });
 
   it('says the run is still going rather than returning half a trace', async () => {
-    const { app } = buildApi({ runtime: slowRuntime(30) });
+    const { runtime, release } = gatedRuntime();
+    const { app, store } = buildApi({ runtime });
     const { runId } = await createRun(app);
 
     const response = await request(app).get(`/api/runs/${runId}`).expect(409);
@@ -197,6 +216,9 @@ describe('GET /api/runs/:runId', () => {
 
     expect(response.headers['content-type']).toContain(PROBLEM_CONTENT_TYPE);
     expect(problem.detail).toContain('/events');
+
+    release();
+    await store.get(runId)?.whenFinished;
   });
 
   it('returns problem+json for a run this instance has never heard of', async () => {
@@ -274,12 +296,17 @@ describe('ingress limits', () => {
   });
 
   it('sheds load rather than growing without bound', async () => {
-    const { app, store } = buildApi({ store: new RunStore({ maxRuns: 1 }) });
+    // The cap is only full while the first run is in flight, so the first run is
+    // held at the gate rather than raced against.
+    const { runtime, release } = gatedRuntime();
+    const { app, store } = buildApi({ runtime, store: new RunStore({ maxRuns: 1 }) });
 
     const first = await createRun(app);
     const response = await request(app).post('/api/runs').send({ query: DEMO_QUERY }).expect(503);
 
     expect(ProblemDetailsSchema.parse(response.body).type).toBe('/problems/at-capacity');
+
+    release();
     await store.get(first.runId)?.whenFinished;
   });
 });

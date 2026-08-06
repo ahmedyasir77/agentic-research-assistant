@@ -1,16 +1,20 @@
 import { join } from 'node:path';
 
+import { createAnthropicClient } from './llm/anthropic.ts';
 import type { Config } from './config/env.ts';
 import { defaultFixturesDir } from './config/paths.ts';
 import { createFakeLlmClient, LlmScriptSchema, type LlmScript } from './llm/fake.ts';
+import { isPricingKnown } from './llm/pricing.ts';
 import type { LlmClient } from './llm/port.ts';
 import { readJsonFixture } from './platform/fixtureFile.ts';
 import { createFixtureDnsResolver, createFixtureHttpClient } from './platform/fixtureHttpClient.ts';
 import type { GuardedGetDeps } from './platform/guardedGet.ts';
 import { createAxiosHttpClient } from './platform/httpClient.ts';
+import { createAxiosJsonPoster, type JsonPoster } from './platform/jsonPost.ts';
 import type { Logger } from './platform/logger.ts';
 import { systemDnsResolver } from './platform/ssrf.ts';
 import { createFixtureSearchProvider, slugify } from './search/fixture.ts';
+import { createTavilySearchProvider } from './search/tavily.ts';
 import type { SearchProvider } from './search/port.ts';
 import { createToolRegistry } from './tools/index.ts';
 import type { ToolRegistry } from './tools/registry.ts';
@@ -35,6 +39,8 @@ export interface RuntimeOptions {
   readonly logger: Logger;
   /** Overridden in tests; defaults to the repo's `fixtures/` directory. */
   readonly fixturesDir?: string;
+  /** Overridden in tests so an adapter can be pointed at a stub server. */
+  readonly post?: JsonPoster;
 }
 
 export function createAgentRuntime(options: RuntimeOptions): AgentRuntime {
@@ -42,7 +48,8 @@ export function createAgentRuntime(options: RuntimeOptions): AgentRuntime {
   const fixturesDir = options.fixturesDir ?? config.fixturesDir ?? defaultFixturesDir();
   const offline = config.demoMode === 'offline';
 
-  const searchProvider = createSearchProvider(config, fixturesDir);
+  const post = options.post ?? createAxiosJsonPoster();
+  const searchProvider = createSearchProvider(config, fixturesDir, post);
   const http = createHttpDeps(offline, fixturesDir);
 
   logger.info(
@@ -50,16 +57,28 @@ export function createAgentRuntime(options: RuntimeOptions): AgentRuntime {
     'agent runtime composed',
   );
 
+  // Said once, at boot, rather than silently on every run: an unpriced model is
+  // billed at the fallback tier, so every cost in the trace is a guess.
+  if (!offline && !isPricingKnown(config.llm.modelId)) {
+    logger.warn(
+      { model: config.llm.modelId },
+      'no list price for this model — estimated costs will use the fallback tier and be wrong',
+    );
+  }
+
   return {
     tools: createToolRegistry({ searchProvider, http }),
     modelId: offline ? 'fake-model' : config.llm.modelId,
     llmFor: (query) => {
-      // M7 replaces this branch with llm/anthropic.ts. Until then live mode fails
-      // loudly rather than silently falling back to fixtures — a run that claims
-      // to be live must actually be live.
       if (!offline) {
-        return Promise.reject(
-          new Error('Live mode needs the Anthropic adapter (M7). Run with DEMO_MODE=offline.'),
+        // Config already refuses to start live without a key; this narrows the
+        // type at the one place that needs the value rather than asserting.
+        const apiKey = config.llm.apiKey;
+        if (apiKey === undefined) {
+          return Promise.reject(new Error('DEMO_MODE=live needs ANTHROPIC_API_KEY.'));
+        }
+        return Promise.resolve(
+          createAnthropicClient({ apiKey, modelId: config.llm.modelId, post }),
         );
       }
       return createOfflineLlmClient(fixturesDir, query, logger);
@@ -67,9 +86,16 @@ export function createAgentRuntime(options: RuntimeOptions): AgentRuntime {
   };
 }
 
-function createSearchProvider(config: Config, fixturesDir: string): SearchProvider {
+function createSearchProvider(
+  config: Config,
+  fixturesDir: string,
+  post: JsonPoster,
+): SearchProvider {
   if (config.search.provider === 'fixture') return createFixtureSearchProvider(fixturesDir);
-  throw new Error('The Tavily search adapter arrives in M7. Use SEARCH_PROVIDER=fixture.');
+
+  const apiKey = config.search.apiKey;
+  if (apiKey === undefined) throw new Error('SEARCH_PROVIDER=tavily needs TAVILY_API_KEY.');
+  return createTavilySearchProvider({ apiKey, post });
 }
 
 function createHttpDeps(offline: boolean, fixturesDir: string): GuardedGetDeps {

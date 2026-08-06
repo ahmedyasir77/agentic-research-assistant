@@ -51,6 +51,11 @@ export function readFailure(error: unknown, now: () => number = Date.now): Failu
   if (!parsed.success) return {};
 
   const status = parsed.data.response?.status ?? parsed.data.status;
+  if (parsed.data.code === undefined && status === undefined) {
+    // An adapter that wraps a provider failure in its own error type still has to
+    // be classifiable, so the facts are looked for one level down as well.
+    return readCause(error, now);
+  }
   const retryAfterMs = parseRetryAfter(parsed.data.response?.headers?.['retry-after'], now);
 
   return {
@@ -58,6 +63,14 @@ export function readFailure(error: unknown, now: () => number = Date.now): Failu
     ...(status === undefined ? {} : { status }),
     ...(retryAfterMs === undefined ? {} : { retryAfterMs }),
   };
+}
+
+const CauseSchema = z.object({ cause: z.unknown() });
+
+function readCause(error: object, now: () => number): FailureFacts {
+  const parsed = CauseSchema.safeParse(error);
+  const cause = parsed.success ? parsed.data.cause : undefined;
+  return cause === undefined || cause === error ? {} : readFailure(cause, now);
 }
 
 /** RFC 9110 allows either delay-seconds or an HTTP-date; servers use both. */
