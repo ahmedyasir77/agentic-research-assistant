@@ -11,9 +11,13 @@ import type { Config } from '../config/env.ts';
  */
 export interface AgentPolicy extends RunBudgets {
   /**
-   * How many times the loop will tell a model that answered in plain prose to use
-   * the `finish` tool instead. One is enough: a model that ignores the correction
-   * twice is not going to be talked round on the third attempt.
+   * How many times the loop will send a correction back to the model — either to
+   * use the `finish` tool instead of plain prose, or to re-read a source instead of
+   * shipping a quote that is not in it. Two, not one: a quote nudge names the exact
+   * sentence that failed and the fix is mechanical (read again, copy exactly), which
+   * a model routinely gets right on a second attempt but not always on the first.
+   * The budget is shared with the prose correction so a run that needed both still
+   * pays for only two extra steps, not four.
    */
   readonly maxNudges: number;
 }
@@ -22,18 +26,19 @@ export interface AgentPolicy extends RunBudgets {
  * Sized for a question that needs real research rather than a lookup.
  *
  * The old 8 steps and 60s fitted a demo question — search, read, finish — and cut
- * off anything larger mid-sentence. An open question costs more than that before
- * anyone has done anything wrong: several sources read, a long answer written, and
- * possibly a correction round after the grounding check sends the agent back for a
- * quote. The budget has to cover the honest version of the work, or the rails stop
- * bounding a runaway loop and start truncating ordinary runs.
+ * off anything larger mid-sentence. 14 was the next line drawn, and a real run still
+ * found the edge of it: several sources, several offsets into a truncated page, and
+ * a citation correction round each cost a step, and a question with more than a
+ * couple of sources ran out before `finish` did. The budget has to cover the honest
+ * version of the work, or the rails stop bounding a runaway loop and start
+ * truncating ordinary runs.
  */
 export const DEFAULT_POLICY: AgentPolicy = {
-  maxSteps: 14,
+  maxSteps: 20,
   maxWallClockMs: 180_000,
   maxToolCallsPerStep: 3,
   maxOutputTokens: 4_096,
-  maxNudges: 1,
+  maxNudges: 2,
 };
 
 export function policyFromConfig(config: Config): AgentPolicy {

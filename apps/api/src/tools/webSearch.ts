@@ -36,10 +36,14 @@ export function createWebSearchTool(
     name: 'web_search',
     description:
       'Search the web for pages relevant to a query. Returns titles, URLs and snippets. ' +
-      'Start here when you need facts you do not already have; follow up with http_get to read a page in full.',
+      'Start here when you need facts you do not already have, then read the promising pages ' +
+      'with http_get. The snippets are the search engine summarising a page, not the page — ' +
+      'they tell you which URL is worth reading, and a quote taken from one is not a quote ' +
+      'from the source.',
     inputSchema: InputSchema,
     outputSchema: OutputSchema,
     timeoutMs: 10_000,
+    evidence: 'snippet',
     execute: async ({ query, maxResults }, ctx) => {
       const results = await withRetry(
         () => deps.provider.search({ query, maxResults, signal: ctx.signal }),

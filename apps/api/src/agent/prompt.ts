@@ -101,13 +101,19 @@ export function buildQuoteNudge(failed: readonly Citation[]): string {
 
   return [
     'Those citations were checked against the text these pages returned during this run, and',
-    'these quotes are not in it:',
+    'these quotes are not in it, character for character:',
     listed,
     '',
     'That is usually one of two things: the sentence was recalled rather than copied, or it is',
-    'further down a page whose read came back truncated. For each one, read the source again with',
-    'http_get — passing offset to reach the part you have not seen yet — and copy the supporting',
-    'sentence exactly as it appears in the result. If the page turns out not to say it, drop the',
-    'claim or cite a source that does. Then call finish again. Keep the rest of the answer.',
+    'further down a page whose read came back truncated. Fix it by reading, not by rewording —',
+    'a closer paraphrase will still fail the same check. For each one:',
+    '1. Re-read the source with http_get. If the earlier read had truncated=true, pass offset to',
+    '   reach the part you have not seen yet.',
+    '2. Find the exact sentence and paste it as the quote, unedited — do not fix its punctuation,',
+    "   shorten it, or merge it with a neighbouring sentence. If you cannot find the words you meant",
+    '   to quote, pick a shorter run of words you can find verbatim rather than reconstructing one.',
+    '3. If the page does not say it after that, the claim is not supported. Drop the claim, or cite',
+    '   a source that does say it.',
+    'Then call finish again with the corrected citations. Keep the rest of the answer as it is.',
   ].join('\n');
 }
