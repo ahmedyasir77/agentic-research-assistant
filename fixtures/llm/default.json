@@ -34,12 +34,14 @@
               {
                 "id": 1,
                 "url": "https://example.org/offline-demo",
-                "title": "Offline demo — this result is recorded, not live"
+                "title": "Offline demo — this result is recorded, not live",
+                "quote": "search results come from fixtures/search/ rather than a live provider"
               },
               {
                 "id": 2,
                 "url": "https://example.org/offline-demo/recording",
-                "title": "How to record a fixture"
+                "title": "How to record a fixture",
+                "quote": "Run once against the live providers with DEMO_MODE=live"
               }
             ]
           }

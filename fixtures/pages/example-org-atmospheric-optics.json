@@ -1,0 +1,6 @@
+{
+  "url": "https://example.org/atmospheric-optics",
+  "status": 200,
+  "contentType": "text/html",
+  "body": "<html><head><title>Atmospheric optics: scattering and colour</title><style>body{margin:0;font-family:serif}</style></head><body><h1>Atmospheric optics: scattering and colour</h1><p>The colour of the daytime sky is set by how strongly air scatters each wavelength, and the colour of the sky at the horizon is set by how far the light has had to travel to reach you.</p><p>At sunset light travels a longer path through the atmosphere, scattering away most of the blue and leaving the reds and oranges that reach the observer. The same molecules that make the noon sky blue are responsible for the red of the evening one.</p><p>Path length also explains why the sky is a paler blue near the horizon than overhead at midday: light arriving along a shallow angle has been scattered many times over, and multiple scattering mixes the colours back towards white.</p><script>console.log('ignored')</script></body></html>"
+}

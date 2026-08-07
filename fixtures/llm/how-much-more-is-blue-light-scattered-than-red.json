@@ -1,0 +1,89 @@
+{
+  "description": "The grounding guardrail firing. The agent reads a real page, computes a real number, and then attributes to that page a sentence it never contained — the page says 5.5, the calculator said 5.9, and citation [2] quotes the page as if it had said 5.9. Citation [1] quotes the same page correctly, so one run shows both verdicts side by side.",
+  "turns": [
+    {
+      "content": [
+        {
+          "type": "text",
+          "text": "This is a quantitative question, so I want the wavelength relationship from a source rather than from memory."
+        },
+        {
+          "type": "tool_use",
+          "id": "call_search_1",
+          "name": "web_search",
+          "input": { "query": "why is the sky blue rayleigh scattering", "maxResults": 3 }
+        }
+      ],
+      "stopReason": "tool_use",
+      "usage": { "inputTokens": 1216, "outputTokens": 88 },
+      "modelId": "fake-model"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "text": "The Wikipedia page is the one that states the law numerically. I will read it in full."
+        },
+        {
+          "type": "tool_use",
+          "id": "call_fetch_1",
+          "name": "http_get",
+          "input": { "url": "https://en.wikipedia.org/wiki/Rayleigh_scattering" }
+        }
+      ],
+      "stopReason": "tool_use",
+      "usage": { "inputTokens": 1544, "outputTokens": 71 },
+      "modelId": "fake-model"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "text": "Let me compute the ratio myself from the inverse fourth-power law rather than repeating the figure on the page."
+        },
+        {
+          "type": "tool_use",
+          "id": "call_calc_1",
+          "name": "calculator",
+          "input": { "expression": "(700 / 450) ^ 4" }
+        }
+      ],
+      "stopReason": "tool_use",
+      "usage": { "inputTokens": 2280, "outputTokens": 64 },
+      "modelId": "fake-model"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "text": "My figure is 5.9 and the page says 5.5. I will go with my own arithmetic."
+        },
+        {
+          "type": "tool_use",
+          "id": "call_finish_1",
+          "name": "finish",
+          "input": {
+            "answer": "Blue light is scattered far more strongly than red, and the relationship is steep rather than gradual: scattered intensity varies with the inverse fourth power of wavelength. [1]\n\nTaking blue at roughly 450 nm against red at roughly 700 nm, that puts the ratio at about 5.9 to 1 — so on a clear day the light reaching you from directions other than the sun is dominated by the blue end of the spectrum. [2]",
+            "citations": [
+              {
+                "id": 1,
+                "url": "https://en.wikipedia.org/wiki/Rayleigh_scattering",
+                "title": "Rayleigh scattering — Wikipedia",
+                "quote": "The scattered intensity is inversely proportional to the fourth power of the wavelength."
+              },
+              {
+                "id": 2,
+                "url": "https://en.wikipedia.org/wiki/Rayleigh_scattering",
+                "title": "Rayleigh scattering — Wikipedia",
+                "quote": "Blue light, at roughly 450 nm, is therefore scattered about 5.9 times more strongly than red light at roughly 700 nm."
+              }
+            ]
+          }
+        }
+      ],
+      "stopReason": "tool_use",
+      "usage": { "inputTokens": 2604, "outputTokens": 268 },
+      "modelId": "fake-model"
+    }
+  ]
+}

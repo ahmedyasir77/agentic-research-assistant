@@ -1,5 +1,5 @@
 {
-  "description": "The default offline run: search, read one source, compute the scattering ratio, then finish with two verifiable citations.",
+  "description": "The default offline run: search, read both sources it intends to cite in one parallel step, compute the scattering ratio, then finish with two citations whose quotes both appear in the page text those sources actually served.",
   "turns": [
     {
       "content": [
@@ -11,28 +11,47 @@
           "type": "tool_use",
           "id": "call_search_1",
           "name": "web_search",
-          "input": { "query": "why is the sky blue rayleigh scattering", "maxResults": 3 }
+          "input": {
+            "query": "why is the sky blue rayleigh scattering",
+            "maxResults": 3
+          }
         }
       ],
       "stopReason": "tool_use",
-      "usage": { "inputTokens": 1240, "outputTokens": 96 },
+      "usage": {
+        "inputTokens": 1240,
+        "outputTokens": 96
+      },
       "modelId": "fake-model"
     },
     {
       "content": [
         {
           "type": "text",
-          "text": "The Wikipedia result looks the most precise about the wavelength relationship. I will read it properly before citing it."
+          "text": "The Wikipedia result is the most precise about the wavelength relationship, and the atmospheric-optics page covers the sunset case. I will read both properly before citing either — the snippets are the search engine's words, not the sources'. The two fetches are independent, so they go in one turn."
         },
         {
           "type": "tool_use",
           "id": "call_fetch_1",
           "name": "http_get",
-          "input": { "url": "https://en.wikipedia.org/wiki/Rayleigh_scattering" }
+          "input": {
+            "url": "https://en.wikipedia.org/wiki/Rayleigh_scattering"
+          }
+        },
+        {
+          "type": "tool_use",
+          "id": "call_fetch_2",
+          "name": "http_get",
+          "input": {
+            "url": "https://example.org/atmospheric-optics"
+          }
         }
       ],
       "stopReason": "tool_use",
-      "usage": { "inputTokens": 1580, "outputTokens": 74 },
+      "usage": {
+        "inputTokens": 1580,
+        "outputTokens": 118
+      },
       "modelId": "fake-model"
     },
     {
@@ -45,11 +64,16 @@
           "type": "tool_use",
           "id": "call_calc_1",
           "name": "calculator",
-          "input": { "expression": "(700 / 450) ^ 4" }
+          "input": {
+            "expression": "(700 / 450) ^ 4"
+          }
         }
       ],
       "stopReason": "tool_use",
-      "usage": { "inputTokens": 2310, "outputTokens": 68 },
+      "usage": {
+        "inputTokens": 2310,
+        "outputTokens": 68
+      },
       "modelId": "fake-model"
     },
     {
@@ -63,24 +87,29 @@
           "id": "call_finish_1",
           "name": "finish",
           "input": {
-            "answer": "The sky is blue because of Rayleigh scattering: air molecules are far smaller than the wavelength of visible light, and they scatter short wavelengths much more strongly than long ones. [1]\n\nThe effect is steep. Scattered intensity varies with the inverse fourth power of wavelength, so blue light at about 450 nm is scattered roughly 5.9 times more than red light at about 700 nm — a ratio I checked directly rather than taking on trust. Sunlight reaching you from every direction other than the sun itself is therefore dominated by blue. [1]\n\nTwo details are worth adding. Violet scatters even more strongly than blue, but sunlight contains less of it and the human eye is less sensitive to it, so the sky reads as blue rather than violet. [1] And at sunset the light travels a much longer path through the atmosphere, by which point most of the blue has been scattered away and the reds and oranges are what remain. [2]",
+            "answer": "The sky is blue because of Rayleigh scattering: air molecules are far smaller than the wavelength of visible light, and they scatter short wavelengths much more strongly than long ones. [1]\n\nThe effect is steep: scattered intensity varies with the inverse fourth power of wavelength. [1] Working that through for 450 nm against 700 nm gives a ratio of about 5.9 — my own arithmetic, which is worth separating from the source, since the page rounds it to 5.5. Either way, sunlight reaching you from every direction other than the sun itself is dominated by blue.\n\nTwo details are worth adding. Violet scatters even more strongly than blue, but sunlight contains less of it and the human eye is less sensitive to it, so the sky reads as blue rather than violet. [1] And at sunset the light travels a much longer path through the atmosphere, by which point most of the blue has been scattered away and the reds and oranges are what remain. [2]",
             "citations": [
               {
                 "id": 1,
                 "url": "https://en.wikipedia.org/wiki/Rayleigh_scattering",
-                "title": "Rayleigh scattering — Wikipedia"
+                "title": "Rayleigh scattering — Wikipedia",
+                "quote": "The scattered intensity is inversely proportional to the fourth power of the wavelength."
               },
               {
                 "id": 2,
                 "url": "https://example.org/atmospheric-optics",
-                "title": "Atmospheric optics: scattering and colour"
+                "title": "Atmospheric optics: scattering and colour",
+                "quote": "At sunset light travels a longer path through the atmosphere, scattering away most of the blue"
               }
             ]
           }
         }
       ],
       "stopReason": "tool_use",
-      "usage": { "inputTokens": 2640, "outputTokens": 412 },
+      "usage": {
+        "inputTokens": 2640,
+        "outputTokens": 412
+      },
       "modelId": "fake-model"
     }
   ]
