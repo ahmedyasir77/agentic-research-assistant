@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { DEFAULT_POLICY } from '../agent/policy.ts';
 import { ConfigError, loadConfig } from './env.ts';
 
 const OFFLINE: NodeJS.ProcessEnv = { DEMO_MODE: 'offline', SEARCH_PROVIDER: 'fixture' };
@@ -10,7 +11,12 @@ describe('loadConfig', () => {
     expect(config.demoMode).toBe('offline');
     expect(config.search.provider).toBe('fixture');
     expect(config.llm.modelId).toBe('claude-opus-5');
-    expect(config.budgets.maxSteps).toBe(8);
+    // Asserted against the policy rather than a literal, because these are two
+    // spellings of one number: the env default is what a run without env vars gets,
+    // and DEFAULT_POLICY is what the docs and the tests call the rails. Pinning the
+    // literal here let them drift apart silently.
+    expect(config.budgets.maxSteps).toBe(DEFAULT_POLICY.maxSteps);
+    expect(config.budgets.maxWallClockMs).toBe(DEFAULT_POLICY.maxWallClockMs);
   });
 
   it('coerces numeric variables, which arrive from the environment as strings', () => {

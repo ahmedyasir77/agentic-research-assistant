@@ -15,11 +15,16 @@ const ctx: ToolContext = {
   logger: silentLogger,
 };
 
-function deps(body: string, contentType = 'text/html', address = '93.184.216.34'): GuardedGetDeps {
+function deps(
+  body: string,
+  contentType = 'text/html',
+  address = '93.184.216.34',
+  status = 200,
+): GuardedGetDeps {
   const http: HttpClient = {
     get: () =>
       Promise.resolve({
-        status: 200,
+        status,
         headers: { 'content-type': contentType },
         body: Readable.from([body]),
       }),
@@ -49,6 +54,32 @@ describe('http_get', () => {
     await expect(promise).rejects.toThrow(/Pick a different, public URL/u);
   });
 
+  it('refuses a bot challenge instead of returning it as the page', async () => {
+    // The exact shape that produced false citations: a Vercel checkpoint served as
+    // real HTML from the real URL, with a 429 beside it that nothing looked at.
+    const challenge =
+      '<html><body>Vercel Security Checkpoint We&#8217;re verifying your browser</body></html>';
+    const tool = createHttpGetTool(deps(challenge, 'text/html', '93.184.216.34', 429));
+    const promise = tool.execute({ url: 'https://example.com/blog/post' }, ctx);
+
+    await expect(promise).rejects.toThrow(ToolExecutionError);
+    await expect(promise).rejects.toThrow(/refusing automated readers/u);
+    await expect(promise).rejects.toThrow(/Do not cite this page/u);
+  });
+
+  it.each([
+    [404, /gone or the URL is wrong/u],
+    [403, /refusing automated readers/u],
+    [503, /failing right now/u],
+    [418, /not a page that can be read/u],
+  ])('turns a %i into advice the model can act on', async (status, expected) => {
+    const tool = createHttpGetTool(deps('<p>nope</p>', 'text/html', '93.184.216.34', status));
+    const promise = tool.execute({ url: 'https://example.com/a' }, ctx);
+
+    await expect(promise).rejects.toThrow(expected);
+    await expect(promise).rejects.toThrow(/Do not cite this page/u);
+  });
+
   it('explains an unreadable content type', async () => {
     const tool = createHttpGetTool(deps('%PDF-1.4', 'application/pdf'));
     await expect(tool.execute({ url: 'https://example.com/a.pdf' }, ctx)).rejects.toThrow(
@@ -57,11 +88,64 @@ describe('http_get', () => {
   });
 
   it('flags a truncated excerpt rather than silently shortening it', async () => {
-    const tool = createHttpGetTool(deps('x'.repeat(5_000), 'text/plain'));
+    const tool = createHttpGetTool(deps('x'.repeat(20_000), 'text/plain'));
     const output = await tool.execute({ url: 'https://example.com/long' }, ctx);
 
     expect(output.truncated).toBe(true);
-    expect(output.textExcerpt).toHaveLength(4_000);
+    expect(output.textExcerpt).toHaveLength(12_000);
+    // Enough to act on: where this piece started, how much page there is, and where
+    // the next read picks up.
+    expect(output.offset).toBe(0);
+    expect(output.totalChars).toBe(20_000);
+    expect(output.nextOffset).toBe(12_000);
+  });
+
+  it('reads on from an offset so a long page can be finished', async () => {
+    // The sentence worth citing is past the first excerpt — the case that used to
+    // end with the model quoting a page it had only partly seen.
+    const page = `${'x'.repeat(13_000)}The endowment is larger than the GDP of some countries.`;
+    const tool = createHttpGetTool(deps(page, 'text/plain'));
+
+    const first = await tool.execute({ url: 'https://example.com/long' }, ctx);
+    expect(first.textExcerpt).not.toContain('endowment');
+
+    const second = await tool.execute(
+      { url: 'https://example.com/long', offset: first.nextOffset },
+      ctx,
+    );
+
+    expect(second.offset).toBe(12_000);
+    expect(second.textExcerpt).toContain('The endowment is larger than');
+    expect(second.truncated).toBe(false);
+    expect(second.nextOffset).toBeUndefined();
+  });
+
+  it('returns the whole of a page that fits, and says there is no more', async () => {
+    const tool = createHttpGetTool(deps('<p>Short and complete.</p>'));
+    const output = await tool.execute({ url: 'https://example.com/short' }, ctx);
+
+    expect(output.truncated).toBe(false);
+    expect(output.nextOffset).toBeUndefined();
+    expect(output.totalChars).toBe('Short and complete.'.length);
+  });
+
+  it('clamps an offset past the end instead of failing the call', async () => {
+    const tool = createHttpGetTool(deps('short', 'text/plain'));
+    const output = await tool.execute({ url: 'https://example.com/short', offset: 9_999 }, ctx);
+
+    // An empty excerpt next to the real length tells the model it overshot, which
+    // it can act on; an error is one more thing to recover from.
+    expect(output.textExcerpt).toBe('');
+    expect(output.offset).toBe(5);
+    expect(output.totalChars).toBe(5);
+    expect(output.truncated).toBe(false);
+  });
+
+  it('rejects a negative offset before any request is made', () => {
+    const tool = createHttpGetTool(deps(''));
+    expect(tool.inputSchema.safeParse({ url: 'https://example.com', offset: -1 }).success).toBe(
+      false,
+    );
   });
 
   it('rejects a non-url before any request is made', () => {
@@ -84,6 +168,29 @@ describe('extractText', () => {
     expect(extractText('<p>Tom &amp; Jerry &lt;3 &quot;x&quot;&nbsp;y</p>', 'text/html')).toBe(
       'Tom & Jerry <3 "x" y',
     );
+  });
+
+  it('decodes numeric references, which publishing platforms emit mid-sentence', () => {
+    // The shape that broke citations: a page writing the same apostrophe two ways.
+    expect(
+      extractText('<p>these universities&#8217; mission and Harvard&#x2019;s too</p>', 'text/html'),
+    ).toBe('these universities’ mission and Harvard’s too');
+    expect(extractText('<p>Tuition &#038; Cost &#8211; 2026</p>', 'text/html')).toBe(
+      'Tuition & Cost – 2026',
+    );
+  });
+
+  it('keeps a double-encoded reference literal rather than decoding it twice', () => {
+    expect(extractText('<p>write &amp;#8217; for an apostrophe</p>', 'text/html')).toBe(
+      'write &#8217; for an apostrophe',
+    );
+    expect(extractText('<p>write &#38;lt; for a less-than</p>', 'text/html')).toBe(
+      'write &lt; for a less-than',
+    );
+  });
+
+  it('leaves a reference that is not a usable code point as written', () => {
+    expect(extractText('<p>&#0; &#1114112; ok</p>', 'text/html')).toBe('&#0; &#1114112; ok');
   });
 
   it('leaves non-html alone, so json stays parseable', () => {

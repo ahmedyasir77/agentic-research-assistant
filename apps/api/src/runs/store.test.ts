@@ -1,11 +1,11 @@
-import { RunTraceSchema, type RunTrace } from '@ara/shared';
+import { RunTraceSchema, TRACE_SCHEMA_VERSION, type RunTrace } from '@ara/shared';
 import { describe, expect, it } from 'vitest';
 
 import { RunCapacityError, RunStore } from './store.ts';
 
 function trace(runId: string, status: 'succeeded' | 'failed' = 'succeeded'): RunTrace {
   return RunTraceSchema.parse({
-    v: 1,
+    v: TRACE_SCHEMA_VERSION,
     runId,
     query: 'anything',
     status,

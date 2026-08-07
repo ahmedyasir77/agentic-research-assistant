@@ -322,10 +322,13 @@ describe('scenario 4 — the wall clock', () => {
 
 describe('scenario 5 — the model will not call finish', () => {
   it('nudges once, then stops rather than looping forever', async () => {
-    const agentDeps = deps([
-      turn.text('The sky is blue because of scattering.'),
-      turn.text('I already told you: scattering.'),
-    ]);
+    const agentDeps = deps(
+      [
+        turn.text('The sky is blue because of scattering.'),
+        turn.text('I already told you: scattering.'),
+      ],
+      { policy: { maxNudges: 1 } },
+    );
 
     const { events, trace } = await run('why is the sky blue', agentDeps);
 
@@ -478,7 +481,7 @@ describe('scenario 6 — citations that do not hold up', () => {
         },
       },
     ]);
-    const agentDeps = deps([read, repeated, repeated]);
+    const agentDeps = deps([read, repeated, repeated], { policy: { maxNudges: 1 } });
 
     const { trace } = await run('why is the sky blue', agentDeps);
 
@@ -495,7 +498,7 @@ describe('scenario 6 — citations that do not hold up', () => {
   it('lets a misquote stand, labelled, rather than looping on it', async () => {
     // A model that will not take the correction still has to end the run, and the
     // label is what carries the failure once the nudge has been spent.
-    const agentDeps = deps([read, misquoteFinish, misquoteFinish]);
+    const agentDeps = deps([read, misquoteFinish, misquoteFinish], { policy: { maxNudges: 1 } });
 
     const { trace } = await run('why is the sky blue', agentDeps);
 
@@ -552,7 +555,7 @@ describe('scenario 7 — an answer built entirely from search snippets', () => {
   it('corrects once and then lets the answer stand, rather than looping', async () => {
     // A model that will not take the correction still has to end the run. The
     // labels carry what the nudge could not.
-    const agentDeps = deps([search, snippetFinish, snippetFinish]);
+    const agentDeps = deps([search, snippetFinish, snippetFinish], { policy: { maxNudges: 1 } });
 
     const { trace } = await run('why is the sky blue', agentDeps);
 

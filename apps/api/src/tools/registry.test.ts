@@ -23,6 +23,7 @@ function echoTool(overrides: Partial<Tool<{ value: string }, { echoed: string }>
     inputSchema: z.object({ value: z.string().min(1) }),
     outputSchema: z.object({ echoed: z.string() }),
     timeoutMs: 50,
+    evidence: 'none',
     execute: ({ value }) => Promise.resolve({ echoed: value }),
     ...overrides,
   };

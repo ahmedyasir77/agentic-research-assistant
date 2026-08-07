@@ -22,6 +22,8 @@ describe('blockedReason', () => {
     ['172.16.0.1', 'private'],
     ['172.31.255.1', 'private'],
     ['192.168.1.1', 'private'],
+    ['192.0.0.1', 'IETF protocol assignments'],
+    ['192.0.0.255', 'IETF protocol assignments'],
     ['169.254.169.254', 'link-local'],
     ['100.64.0.1', 'carrier'],
     ['224.0.0.1', 'multicast'],
@@ -44,6 +46,16 @@ describe('blockedReason', () => {
   const allowed = ['93.184.216.34', '8.8.8.8', '172.32.0.1', '192.169.0.1', '2606:2800:220:1::1'];
 
   it.each(allowed)('allows the public address %s', (address) => {
+    expect(blockedReason(address)).toBeUndefined();
+  });
+
+  // 192.0.0.0/24 is one /24, not the /16 it is easy to mistake it for. Blocking
+  // the /16 made real hosts unreachable and the failure looked like a citation
+  // problem rather than a network one, so the first address past the boundary is
+  // pinned here.
+  const publicWithin192_0 = ['192.0.1.1', '192.0.66.20', '192.0.78.12', '192.0.255.255'];
+
+  it.each(publicWithin192_0)('allows %s, which is outside 192.0.0.0/24', (address) => {
     expect(blockedReason(address)).toBeUndefined();
   });
 });
