@@ -1,9 +1,14 @@
 import { MAX_QUERY_LENGTH } from '@ara/shared';
 import { useState, type JSX, type SubmitEventHandler } from 'react';
 
-/** The recorded one first, so a demo with no network still has something to show. */
+/**
+ * The recorded ones first, so a demo with no network still has something to show.
+ * The second is recorded too, and is the run where the grounding check catches a
+ * real source quoted for a sentence it never contained.
+ */
 const EXAMPLES: readonly string[] = [
   'Why is the sky blue?',
+  'How much more is blue light scattered than red?',
   'How much faster is HTTP/3 than HTTP/2?',
   'What did the last CPython release change about the GIL?',
 ];
