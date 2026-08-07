@@ -60,6 +60,12 @@ jobs:
       - name: Build
         run: pnpm -r build
 
+      # The runner's default builder uses the `docker` driver, which cannot export
+      # a build cache. This swaps in a `docker-container` builder so `cache-to:
+      # type=gha` works; `load: true` still hands the image to the local daemon.
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
       # Builds the real image, from the real Dockerfile, on every pull request —
       # so a broken Dockerfile is caught here rather than during a deploy. The
       # image is not pushed; CI has no registry credentials by design.
