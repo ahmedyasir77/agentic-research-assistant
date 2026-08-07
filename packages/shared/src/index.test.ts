@@ -92,7 +92,20 @@ describe('RunTrace', () => {
       durationMs: 4000,
       steps: [],
       answer: 'Rayleigh scattering. [1]',
-      citations: [{ id: 1, url: 'https://example.com/optics', title: 'Optics', verified: true }],
+      citations: [
+        {
+          id: 1,
+          url: 'https://example.com/optics',
+          title: 'Optics',
+          quote: 'Blue light scatters about 5.5 times more than red.',
+          grounding: 'quoted',
+          quoteMatch: {
+            before: '',
+            match: 'Blue light scatters about 5.5 times more than red.',
+            after: '',
+          },
+        },
+      ],
       warnings: [],
       usage: { inputTokens: 100, outputTokens: 50 },
       estimatedCostUsd: 0.00175,
@@ -103,7 +116,7 @@ describe('RunTrace', () => {
 
   it('rejects a citation whose url is not a url', () => {
     const result = RunTraceSchema.shape.citations.safeParse([
-      { id: 1, url: 'not-a-url', title: 'Optics', verified: false },
+      { id: 1, url: 'not-a-url', title: 'Optics', grounding: 'unobserved' },
     ]);
     expect(result.success).toBe(false);
   });
