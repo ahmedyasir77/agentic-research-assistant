@@ -8,7 +8,7 @@ import type {
 
 import { FinishPayloadSchema } from '../tools/finish.ts';
 import type { ToolInvocation } from '../tools/registry.ts';
-import { reviewCitations } from './citations.ts';
+import { reviewCitations, type Evidence } from './citations.ts';
 import type { RunRecorder } from './recorder.ts';
 import type { Clock } from './types.ts';
 
@@ -44,14 +44,14 @@ export function recordStep(
 export function* complete(
   recorder: RunRecorder,
   finished: ToolInvocation,
-  observedUrls: ReadonlySet<string>,
+  evidence: Evidence,
 ): Generator<AgentEvent, RunTrace, void> {
   const payload = FinishPayloadSchema.parse(
     finished.outcome.status === 'ok' ? finished.outcome.output : {},
   );
 
   // The anti-hallucination check, applied before the answer is ever shown.
-  const review = reviewCitations(payload.citations, observedUrls);
+  const review = reviewCitations(payload.citations, evidence);
   for (const warning of review.warnings) recorder.addWarning(warning);
 
   yield recorder.event({ type: 'answer.delta', text: payload.answer });

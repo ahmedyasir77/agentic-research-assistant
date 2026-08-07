@@ -1,8 +1,16 @@
 import { assistantText, toolUses, type LlmMessage, type LlmResponse } from '../llm/port.ts';
 import { withRetry } from '../platform/retry.ts';
+import { FinishPayloadSchema } from '../tools/finish.ts';
+import type { ToolInvocation } from '../tools/registry.ts';
+import {
+  citesOnlyUnreadSources,
+  createEvidence,
+  unsupportedCitations,
+  type Evidence,
+} from './citations.ts';
 import { complete, fail, recordStep } from './outcome.ts';
 import { checkBudget, toRunBudgets } from './policy.ts';
-import { buildSystemPrompt, FINISH_NUDGE } from './prompt.ts';
+import { buildQuoteNudge, buildSystemPrompt, FINISH_NUDGE, SOURCE_NUDGE } from './prompt.ts';
 import { RunRecorder } from './recorder.ts';
 import { executeToolCalls } from './toolStep.ts';
 import type { AgentDeps, AgentRun } from './types.ts';
@@ -34,7 +42,9 @@ export async function* runAgent(query: string, deps: AgentDeps): AgentRun {
   }, policy.maxWallClockMs);
 
   const messages: LlmMessage[] = [{ role: 'user', content: [{ type: 'text', text: query }] }];
-  const observedUrls = new Set<string>();
+  // Accumulated across every tool call in the run, and read once at the end by the
+  // grounding check: what the tools returned, and which URL each part came from.
+  const evidence = createEvidence();
   const system = buildSystemPrompt(policy);
   let lastText = '';
   let nudges = 0;
@@ -121,16 +131,39 @@ export async function* runAgent(query: string, deps: AgentDeps): AgentRun {
         deps,
         recorder,
         signal: deadline.signal,
-        observedUrls,
+        evidence,
       });
 
+      // Asked before the results are handed back, so the correction can ride in the
+      // same user message rather than as a second one — two consecutive user turns
+      // are not a shape the Messages API takes.
+      const correction =
+        executed.finished !== undefined && nudges < policy.maxNudges
+          ? correctionFor(executed.finished, evidence)
+          : undefined;
+
       messages.push({ role: 'assistant', content: response.content });
-      messages.push({ role: 'user', content: executed.results });
+      messages.push({
+        role: 'user',
+        content:
+          correction === undefined
+            ? executed.results
+            : [...executed.results, { type: 'text', text: correction }],
+      });
 
       recordStep(recorder, clock, step, stepStartedAtMs, text, executed.records, response.usage);
 
       if (executed.finished !== undefined) {
-        return yield* complete(recorder, executed.finished, observedUrls);
+        // The answer is fine and the sources are real; only the evidence under them
+        // is second-hand or misquoted, and the agent still has budget to go and fix
+        // it. Sending it back costs a step and is capped, so the worst case is one
+        // wasted step and the same answer — which the labels would have described
+        // anyway.
+        if (correction !== undefined) {
+          nudges += 1;
+          continue;
+        }
+        return yield* complete(recorder, executed.finished, evidence);
       }
     }
   } finally {
@@ -140,4 +173,29 @@ export async function* runAgent(query: string, deps: AgentDeps): AgentRun {
 
 function describeError(error: unknown): string {
   return error instanceof Error ? error.message : 'The model call failed.';
+}
+
+/**
+ * Reads the citations out of a `finish` call and asks what, if anything, is worth
+ * sending the agent back for.
+ *
+ * Parsing here rather than reusing `complete`'s parse keeps the question cheap and
+ * side-effect free: nothing is recorded, no warning is raised, and the payload is
+ * parsed again for real if the run does go on to finish.
+ *
+ * A quote that is not in the page outranks an answer built from snippets. Both are
+ * weak evidence, but only one is an attribution the source never made, and the
+ * nudge budget buys a single correction — so it is spent on the citation that says
+ * something false rather than the one that is merely second-hand.
+ */
+function correctionFor(finished: ToolInvocation, evidence: Evidence): string | undefined {
+  if (finished.outcome.status !== 'ok') return undefined;
+
+  const payload = FinishPayloadSchema.safeParse(finished.outcome.output);
+  if (!payload.success) return undefined;
+
+  const failed = unsupportedCitations(payload.data.citations, evidence);
+  if (failed.length > 0) return buildQuoteNudge(failed);
+
+  return citesOnlyUnreadSources(payload.data.citations, evidence) ? SOURCE_NUDGE : undefined;
 }
