@@ -38,6 +38,27 @@ export class UnsupportedContentTypeError extends Error {
   }
 }
 
+/**
+ * A response that came back but is not the document that was asked for.
+ *
+ * This is an error rather than a result because of what the body of a non-2xx
+ * response is: a 404 page, a 500 stack trace, a bot challenge saying "verifying your
+ * browser". All of those are real HTML served from the right URL, and every layer
+ * above here would otherwise treat them as the page — the model reads a challenge
+ * screen as though it were the article, and the citation checker records the URL as
+ * a source that was successfully read. Failing loudly is what keeps a page nobody
+ * could read from being quoted as though somebody had.
+ */
+export class HttpStatusError extends Error {
+  readonly status: number;
+
+  constructor(status: number) {
+    super(`responded ${String(status)}`);
+    this.name = 'HttpStatusError';
+    this.status = status;
+  }
+}
+
 export interface GuardedGetResult {
   readonly status: number;
   readonly contentType: string;
@@ -109,6 +130,14 @@ async function readBody(
   url: URL,
   signal: AbortSignal,
 ): Promise<GuardedGetResult> {
+  // Checked before the content type, because a refusal served as HTML is a refusal
+  // first and readable text second. Redirects never reach here — followAndFetch has
+  // already resolved or exhausted them.
+  if (response.status < 200 || response.status > 299) {
+    response.body.destroy();
+    throw new HttpStatusError(response.status);
+  }
+
   const mediaType = (response.headers['content-type'] ?? 'application/octet-stream')
     .split(';')[0]
     ?.trim()

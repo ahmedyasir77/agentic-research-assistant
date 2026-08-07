@@ -24,8 +24,8 @@ const EnvSchema = z
     SEARCH_PROVIDER: z.enum(['tavily', 'fixture']).default('fixture'),
     TAVILY_API_KEY: z.string().min(1).optional(),
 
-    MAX_STEPS: z.coerce.number().int().min(1).max(20).default(8),
-    MAX_WALL_CLOCK_MS: z.coerce.number().int().min(1_000).max(300_000).default(60_000),
+    MAX_STEPS: z.coerce.number().int().min(1).max(20).default(14),
+    MAX_WALL_CLOCK_MS: z.coerce.number().int().min(1_000).max(300_000).default(180_000),
     MAX_TOOL_CALLS_PER_STEP: z.coerce.number().int().min(1).max(10).default(3),
     MAX_OUTPUT_TOKENS: z.coerce.number().int().min(256).max(64_000).default(4_096),
 

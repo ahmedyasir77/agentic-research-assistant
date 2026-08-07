@@ -107,7 +107,7 @@ export function blockedReason(address: string): string | undefined {
 
 function blockedIPv4Reason(address: string): string | undefined {
   const octets = address.split('.').map(Number);
-  const [a = 0, b = 0] = octets;
+  const [a = 0, b = 0, c = 0] = octets;
 
   if (a === 0) return 'unspecified / this-network';
   if (a === 10) return 'private range 10.0.0.0/8';
@@ -116,7 +116,10 @@ function blockedIPv4Reason(address: string): string | undefined {
   if (a === 172 && b >= 16 && b <= 31) return 'private range 172.16.0.0/12';
   if (a === 192 && b === 168) return 'private range 192.168.0.0/16';
   if (a === 100 && b >= 64 && b <= 127) return 'carrier-grade NAT 100.64.0.0/10';
-  if (a === 192 && b === 0) return 'IETF protocol assignments 192.0.0.0/24';
+  // A /24, so the third octet has to be checked too. Matching on `192.0` alone
+  // blocked the whole of 192.0.0.0/16 — which is mostly ordinary public space,
+  // including the WordPress VIP range a lot of university and news sites sit on.
+  if (a === 192 && b === 0 && c === 0) return 'IETF protocol assignments 192.0.0.0/24';
   if (a >= 224) return 'multicast / reserved / broadcast';
   return undefined;
 }
