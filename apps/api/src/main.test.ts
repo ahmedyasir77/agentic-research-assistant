@@ -6,7 +6,7 @@ describe('workspace wiring', () => {
   // or module resolution stops working — a class of break that otherwise only
   // shows up at runtime, in the browser, during a demo.
   it('resolves the shared contract package from the api', () => {
-    expect(EVENT_SCHEMA_VERSION).toBe(1);
+    expect(EVENT_SCHEMA_VERSION).toBe(2);
     expect(AgentEventSchema.safeParse({ type: 'nonsense' }).success).toBe(false);
   });
 });

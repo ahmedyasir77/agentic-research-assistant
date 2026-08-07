@@ -71,7 +71,10 @@ describe('offline run for the recorded demo query', () => {
       if (toolNames.includes('finish')) break;
     }
 
-    expect(toolNames).toStrictEqual(['web_search', 'http_get', 'calculator', 'finish']);
+    // Two fetches, because the run cites two sources and reads both — a snippet is
+    // not a reading of the page it describes. They share a step: independent work
+    // goes out in parallel.
+    expect(toolNames).toStrictEqual(['web_search', 'http_get', 'http_get', 'calculator', 'finish']);
     expect(answer).toContain('Rayleigh scattering');
     expect(citations).toHaveLength(2);
 

@@ -22,12 +22,21 @@ import type { AgentDeps, Clock } from './types.ts';
 const SOURCE = 'https://example.com/optics';
 const OTHER_SOURCE = 'https://example.com/scattering';
 
+// Snippets long enough to clear the grounding check's minimum quote length, so a
+// scripted run can quote one and exercise the snippet verdict rather than tripping
+// the too-short rule on the way there.
+const SNIPPET = 'Blue light scatters more strongly than red light does.';
+
 const searchProvider: SearchProvider = {
   name: 'test',
   search: () =>
     Promise.resolve([
-      { title: 'Optics', url: SOURCE, snippet: 'Blue scatters more.' },
-      { title: 'Scattering', url: OTHER_SOURCE, snippet: 'Inverse fourth power.' },
+      { title: 'Optics', url: SOURCE, snippet: SNIPPET },
+      {
+        title: 'Scattering',
+        url: OTHER_SOURCE,
+        snippet: 'Intensity goes as the inverse fourth power.',
+      },
     ]),
 };
 
@@ -54,14 +63,22 @@ function fakeClock(stepMs = 10): Clock {
 
 function deps(
   turns: readonly LlmResponse[],
-  overrides: { policy?: Partial<AgentPolicy>; clock?: Clock; llm?: FakeLlmClient } = {},
+  overrides: {
+    policy?: Partial<AgentPolicy>;
+    clock?: Clock;
+    llm?: FakeLlmClient;
+    http?: HttpClient;
+  } = {},
 ): AgentDeps {
   return {
     runId: 'run_test',
     llm: overrides.llm ?? createFakeLlmClient(turns),
     tools: createToolRegistry({
       searchProvider,
-      http: { http, resolveDns: () => Promise.resolve([{ address: '93.184.216.34', family: 4 }]) },
+      http: {
+        http: overrides.http ?? http,
+        resolveDns: () => Promise.resolve([{ address: '93.184.216.34', family: 4 }]),
+      },
       registry: { now: () => 0 },
     }),
     policy: { ...DEFAULT_POLICY, ...overrides.policy },
@@ -87,16 +104,21 @@ async function run(
 
 const types = (events: readonly AgentEvent[]): string[] => events.map((event) => event.type);
 
-const finishCall = (answer: string, urls: readonly string[]) =>
+/** The sentence the fake page actually contains, for citations meant to hold up. */
+const PAGE_SENTENCE = 'Blue light scatters about 5.5 times more than red.';
+
+type Source = string | { readonly url: string; readonly quote: string };
+
+const finishCall = (answer: string, sources: readonly Source[]) =>
   turn.toolCall([
     {
       id: 'call_finish',
       name: 'finish',
       input: {
         answer,
-        citations: urls.map((url, index) => ({
+        citations: sources.map((source, index) => ({
           id: index + 1,
-          url,
+          ...(typeof source === 'string' ? { url: source } : source),
           title: `Source ${String(index + 1)}`,
         })),
       },
@@ -112,7 +134,7 @@ describe('scenario 1 — the happy path', () => {
       turn.toolCall([{ id: 'c2', name: 'http_get', input: { url: SOURCE } }], {
         text: 'Now I will read the best source.',
       }),
-      finishCall('Blue light scatters more. [1]', [SOURCE]),
+      finishCall('Blue light scatters more. [1]', [{ url: SOURCE, quote: PAGE_SENTENCE }]),
     ]);
 
     const { events, trace } = await run('why is the sky blue', agentDeps);
@@ -120,8 +142,17 @@ describe('scenario 1 — the happy path', () => {
     expect(trace.status).toBe('succeeded');
     expect(trace.outcome).toBe('completed');
     expect(trace.answer).toBe('Blue light scatters more. [1]');
+    // Grounded at both rungs: a tool returned the URL, and the quote is in the text
+    // that tool returned for it.
     expect(trace.citations).toStrictEqual([
-      { id: 1, url: SOURCE, title: 'Source 1', verified: true },
+      {
+        id: 1,
+        url: SOURCE,
+        title: 'Source 1',
+        quote: PAGE_SENTENCE,
+        grounding: 'quoted',
+        quoteMatch: { before: '', match: PAGE_SENTENCE, after: '' },
+      },
     ]);
     expect(trace.warnings).toStrictEqual([]);
     expect(trace.steps).toHaveLength(3);
@@ -350,7 +381,7 @@ describe('scenario 5 — the model will not call finish', () => {
   });
 });
 
-describe('scenario 6 — a hallucinated citation', () => {
+describe('scenario 6 — citations that do not hold up', () => {
   it('marks a citation no tool returned as unverified and warns', async () => {
     const invented = 'https://plausible-but-invented.example.com/paper';
     const agentDeps = deps([
@@ -362,8 +393,9 @@ describe('scenario 6 — a hallucinated citation', () => {
 
     expect(trace.status).toBe('succeeded');
     expect(trace.citations).toStrictEqual([
-      { id: 1, url: SOURCE, title: 'Source 1', verified: true },
-      { id: 2, url: invented, title: 'Source 2', verified: false },
+      // Real source, no quote: the URL was checked and the claim was not.
+      { id: 1, url: SOURCE, title: 'Source 1', grounding: 'url_only' },
+      { id: 2, url: invented, title: 'Source 2', grounding: 'unobserved' },
     ]);
 
     const warning = trace.warnings.find((entry) => entry.kind === 'unverified_citation');
@@ -373,14 +405,190 @@ describe('scenario 6 — a hallucinated citation', () => {
     expect(completed?.type === 'run.completed' && completed.warnings).toHaveLength(1);
   });
 
-  it('verifies a url that a tool returned in any shape, not just search results', async () => {
+  it('does not let a page that refused to load count as a source that was read', async () => {
+    // A bot challenge is real HTML served from the real URL. If the fetch counted as
+    // a read, its text would become evidence for SOURCE, the url check would pass,
+    // and a citation quoting the article from memory would be reported as a source
+    // that "does not contain" the quote — blaming the page for the run's own failure
+    // to read it. The honest verdict is that nothing was ever read here.
+    const blocked: HttpClient = {
+      get: () =>
+        Promise.resolve({
+          status: 429,
+          headers: { 'content-type': 'text/html' },
+          body: Readable.from(['<p>Security Checkpoint: verifying your browser</p>']),
+        }),
+    };
+    const agentDeps = deps(
+      [
+        turn.toolCall([{ id: 'c1', name: 'http_get', input: { url: SOURCE } }]),
+        finishCall('Scattering explains it. [1]', [{ url: SOURCE, quote: PAGE_SENTENCE }]),
+      ],
+      { http: blocked },
+    );
+
+    const { events, trace } = await run('why is the sky blue', agentDeps);
+
+    const failure = events.find((event) => event.type === 'tool.failed');
+    expect(failure?.type === 'tool.failed' && failure.error.message).toMatch(
+      /refusing automated readers.*Do not cite this page/su,
+    );
+
+    expect(trace.citations[0]?.grounding).toBe('unobserved');
+    expect(trace.warnings.map((entry) => entry.kind)).toContain('unverified_citation');
+    expect(trace.warnings.map((entry) => entry.kind)).not.toContain('unsupported_quote');
+  });
+
+  // The one a URL check cannot see. The agent fetched this page and is citing it
+  // honestly; the sentence it puts in the page's mouth is the fabrication.
+  const misquote = 'Blue light scatters about 5.9 times more than red.';
+  const read = turn.toolCall([{ id: 'c1', name: 'http_get', input: { url: SOURCE } }]);
+  const misquoteFinish = finishCall('The ratio is 5.9. [1]', [{ url: SOURCE, quote: misquote }]);
+
+  it('hands a misquote back to the agent instead of shipping it', async () => {
     const agentDeps = deps([
-      turn.toolCall([{ id: 'c1', name: 'http_get', input: { url: SOURCE } }]),
-      finishCall('Read it directly. [1]', [SOURCE]),
+      read,
+      misquoteFinish,
+      finishCall('The ratio is 5.5. [1]', [{ url: SOURCE, quote: PAGE_SENTENCE }]),
     ]);
 
     const { trace } = await run('why is the sky blue', agentDeps);
-    expect(trace.citations[0]?.verified).toBe(true);
+
+    // The run corrected itself before finishing, so nothing unsupported reaches the
+    // user at all — the failure never becomes a warning about a finished answer.
+    expect(trace.status).toBe('succeeded');
+    expect(trace.citations[0]?.grounding).toBe('quoted');
+    expect(trace.warnings).toStrictEqual([]);
+  });
+
+  it('distinguishes several failed quotes from one source', async () => {
+    // The reported shape: the same source cited for several claims is several
+    // citations sharing an id and a url, so a warning built from those two alone
+    // renders every failure as the identical sentence.
+    const repeated = turn.toolCall([
+      {
+        id: 'call_finish',
+        name: 'finish',
+        input: {
+          answer: 'Both claims. [1][1]',
+          citations: [
+            { id: 1, url: SOURCE, title: 'Source 1', quote: misquote },
+            { id: 1, url: SOURCE, title: 'Source 1', quote: 'Red light scatters twice as far.' },
+          ],
+        },
+      },
+    ]);
+    const agentDeps = deps([read, repeated, repeated]);
+
+    const { trace } = await run('why is the sky blue', agentDeps);
+
+    const messages = trace.warnings
+      .filter((entry) => entry.kind === 'unsupported_quote')
+      .map((entry) => entry.message);
+
+    expect(messages).toHaveLength(2);
+    expect(new Set(messages).size).toBe(2);
+    expect(messages[0]).toContain('5.9 times more than red');
+    expect(messages[1]).toContain('Red light scatters twice as far');
+  });
+
+  it('lets a misquote stand, labelled, rather than looping on it', async () => {
+    // A model that will not take the correction still has to end the run, and the
+    // label is what carries the failure once the nudge has been spent.
+    const agentDeps = deps([read, misquoteFinish, misquoteFinish]);
+
+    const { trace } = await run('why is the sky blue', agentDeps);
+
+    expect(trace.status).toBe('succeeded');
+    expect(trace.citations[0]?.grounding).toBe('unsupported');
+    expect(trace.citations[0]?.quoteMatch).toBeUndefined();
+
+    const warning = trace.warnings.find((entry) => entry.kind === 'unsupported_quote');
+    expect(warning?.message).toContain(SOURCE);
+    // The quote itself, so several failures from one source are distinguishable.
+    expect(warning?.message).toContain('5.9 times more than red');
+  });
+
+  it('grounds a quote against a url a tool returned in any shape, not just search results', async () => {
+    const agentDeps = deps([
+      turn.toolCall([{ id: 'c1', name: 'http_get', input: { url: SOURCE } }]),
+      finishCall('Read it directly. [1]', [{ url: SOURCE, quote: PAGE_SENTENCE }]),
+    ]);
+
+    const { trace } = await run('why is the sky blue', agentDeps);
+    expect(trace.citations[0]?.grounding).toBe('quoted');
+  });
+});
+
+describe('scenario 7 — an answer built entirely from search snippets', () => {
+  const search = turn.toolCall([
+    { id: 'c1', name: 'web_search', input: { query: 'why is the sky blue' } },
+  ]);
+  const snippetFinish = finishCall('Blue scatters more. [1]', [{ url: SOURCE, quote: SNIPPET }]);
+
+  it('sends the agent back to read the source instead of accepting the answer', async () => {
+    const agentDeps = deps([
+      search,
+      snippetFinish,
+      turn.toolCall([{ id: 'c2', name: 'http_get', input: { url: SOURCE } }]),
+      finishCall('Blue scatters more. [1]', [{ url: SOURCE, quote: PAGE_SENTENCE }]),
+    ]);
+
+    const { trace } = await run('why is the sky blue', agentDeps);
+
+    // The finish that quoted a snippet did not end the run; the one that quoted the
+    // page did, and its citation is grounded against the page rather than the
+    // search engine's description of it.
+    expect(trace.status).toBe('succeeded');
+    expect(trace.citations[0]?.grounding).toBe('quoted');
+    expect(trace.steps.flatMap((step) => step.toolCalls).map((call) => call.tool)).toStrictEqual([
+      'web_search',
+      'finish',
+      'http_get',
+      'finish',
+    ]);
+  });
+
+  it('corrects once and then lets the answer stand, rather than looping', async () => {
+    // A model that will not take the correction still has to end the run. The
+    // labels carry what the nudge could not.
+    const agentDeps = deps([search, snippetFinish, snippetFinish]);
+
+    const { trace } = await run('why is the sky blue', agentDeps);
+
+    expect(trace.status).toBe('succeeded');
+    expect(trace.citations[0]?.grounding).toBe('snippet');
+    expect(trace.steps).toHaveLength(3);
+  });
+
+  it('accepts an answer that read even one of its sources', async () => {
+    // The nudge asks whether the agent reads what it cites, not whether every
+    // citation cleared the top rung — one page fetched answers that.
+    const agentDeps = deps([
+      turn.toolCall([
+        { id: 'c1', name: 'web_search', input: { query: 'why is the sky blue' } },
+        { id: 'c2', name: 'http_get', input: { url: SOURCE } },
+      ]),
+      finishCall('Blue scatters more. [1][2]', [
+        { url: SOURCE, quote: PAGE_SENTENCE },
+        { url: OTHER_SOURCE, quote: 'Intensity goes as the inverse fourth power.' },
+      ]),
+    ]);
+
+    const { trace } = await run('why is the sky blue', agentDeps);
+
+    expect(trace.citations.map((entry) => entry.grounding)).toStrictEqual(['quoted', 'snippet']);
+    expect(trace.steps).toHaveLength(2);
+  });
+
+  it('leaves an answer that needed no sources alone', async () => {
+    const agentDeps = deps([finishCall('Seventeen times twenty-three is 391.', [])]);
+
+    const { trace } = await run('what is 17 times 23', agentDeps);
+
+    expect(trace.status).toBe('succeeded');
+    expect(trace.citations).toStrictEqual([]);
+    expect(trace.steps).toHaveLength(1);
   });
 });
 
@@ -397,6 +605,29 @@ describe('failures outside the model', () => {
     expect(trace.status).toBe('failed');
     expect(trace.outcome).toBe('llm_error');
     expect(trace.failureMessage).toContain('provider is down');
+  });
+
+  it('calls a model call cut off by the deadline a spent budget, not a provider failure', async () => {
+    // An aborted request throws the SDK's own generic error, so the signal is the
+    // only thing that knows the run ran out of clock rather than the provider going
+    // away. Getting this wrong told a real user to try again in a moment when the
+    // fix was a longer budget.
+    const llm = {
+      modelId: 'fake-model',
+      complete: (request: { signal?: AbortSignal }) =>
+        new Promise<LlmResponse>((_resolve, reject) => {
+          request.signal?.addEventListener('abort', () => {
+            reject(new LlmError('Request was aborted.'));
+          });
+        }),
+    };
+    const agentDeps = { ...deps([], { policy: { maxWallClockMs: 20 } }), llm };
+
+    const { trace } = await run('a question that outlasts the clock', agentDeps);
+
+    expect(trace.status).toBe('failed');
+    expect(trace.outcome).toBe('budget_exceeded');
+    expect(trace.failureMessage).toMatch(/time limit/u);
   });
 
   it('refuses more tool calls in one step than the policy allows', async () => {

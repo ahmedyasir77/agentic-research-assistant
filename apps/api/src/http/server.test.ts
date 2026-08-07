@@ -2,6 +2,7 @@ import {
   AgentEventSchema,
   AppConfigSchema,
   CreateRunResponseSchema,
+  EVENT_SCHEMA_VERSION,
   ListToolsResponseSchema,
   PROBLEM_CONTENT_TYPE,
   ProblemDetailsSchema,
@@ -123,11 +124,15 @@ describe('POST /api/runs then subscribe', () => {
     expect(stream.headers['content-type']).toContain('text/event-stream');
 
     const events = parseSse(stream.text);
+    // Step 1 fetches both sources at once, so it reports two calls and two results.
+    // Every call in a step is announced before any of them resolves.
     const step = (index: number): AgentEventType[] => [
       'agent.step.started',
       'agent.message',
       'tool.called',
+      ...(index === 1 ? (['tool.called'] as AgentEventType[]) : []),
       'tool.succeeded',
+      ...(index === 1 ? (['tool.succeeded'] as AgentEventType[]) : []),
       ...(index === 3 ? (['answer.delta', 'run.completed'] as AgentEventType[]) : []),
     ];
 
@@ -154,7 +159,7 @@ describe('POST /api/runs then subscribe', () => {
     if (completed?.type !== 'run.completed') return;
     expect(completed.answer).toContain('Rayleigh scattering');
     expect(completed.citations).toHaveLength(2);
-    expect(completed.citations.every((citation) => citation.verified)).toBe(true);
+    expect(completed.citations.every((citation) => citation.grounding === 'quoted')).toBe(true);
     expect(completed.warnings).toStrictEqual([]);
   });
 
@@ -167,7 +172,7 @@ describe('POST /api/runs then subscribe', () => {
       .set('Last-Event-ID', '15')
       .expect(200);
 
-    expect(parseSse(resumed.text).map((event) => event.seq)).toStrictEqual([16, 17, 18]);
+    expect(parseSse(resumed.text).map((event) => event.seq)).toStrictEqual([16, 17, 18, 19, 20]);
   });
 
   it('delivers events to a client that subscribed while the run was still going', async () => {
@@ -200,10 +205,11 @@ describe('GET /api/runs/:runId', () => {
     expect(trace.steps.flatMap((step) => step.toolCalls).map((call) => call.tool)).toStrictEqual([
       'web_search',
       'http_get',
+      'http_get',
       'calculator',
       'finish',
     ]);
-    expect(trace.citations.every((citation) => citation.verified)).toBe(true);
+    expect(trace.citations.every((citation) => citation.grounding === 'quoted')).toBe(true);
   });
 
   it('says the run is still going rather than returning half a trace', async () => {
@@ -320,7 +326,7 @@ describe('GET /api/config', () => {
     expect(AppConfigSchema.parse(response.body)).toStrictEqual({
       demoMode: 'offline',
       modelId: 'fake-model',
-      eventSchemaVersion: 1,
+      eventSchemaVersion: EVENT_SCHEMA_VERSION,
     });
   });
 });
