@@ -3,7 +3,7 @@ import { z } from 'zod';
 
 import { toolCallsTotal, toolDurationSeconds } from '../platform/metrics.ts';
 import { TimeoutError, withTimeout } from '../platform/timeout.ts';
-import { ToolExecutionError, type Tool, type ToolContext } from './types.ts';
+import { ToolExecutionError, type Tool, type ToolContext, type ToolEvidence } from './types.ts';
 
 export interface ToolInvocation {
   readonly outcome: ToolOutcome;
@@ -46,6 +46,17 @@ export class ToolRegistry {
 
   has(name: string): boolean {
     return this.#tools.has(name);
+  }
+
+  /**
+   * What a tool's output is worth when a citation is checked against it.
+   *
+   * An unknown name is `none` rather than an error: a call that never resolved to a
+   * tool produced a failure message, not a source, and nothing in it should be
+   * quotable.
+   */
+  evidenceFor(name: string): ToolEvidence {
+    return this.#tools.get(name)?.evidence ?? 'none';
   }
 
   /**
