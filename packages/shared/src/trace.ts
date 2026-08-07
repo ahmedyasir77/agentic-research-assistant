@@ -71,19 +71,75 @@ export const CitationSchema = z.object({
   id: z.number().int().positive(),
   url: z.url(),
   title: z.string(),
+  /**
+   * The sentence in that source which supports the claim, copied verbatim.
+   *
+   * Deliberately optional, and deliberately unbounded below: a model that offers a
+   * quote too short to be evidence should be told so by the check, not rejected by
+   * the validator. A `finish` call that fails validation costs a step and teaches
+   * the model nothing — see the note on the citations array in tools/finish.ts.
+   */
+  quote: z.string().max(500).optional(),
 });
 export type Citation = z.infer<typeof CitationSchema>;
 
 /**
- * A citation the agent claimed, plus whether a tool in this run actually returned
- * that URL. Unverified ones are kept rather than deleted so the UI can show the
- * anti-hallucination check doing its job.
+ * How well a claimed citation stood up, from strongest to weakest.
+ *
+ * - `quoted` — the quote appears verbatim in the page body a tool actually fetched.
+ *   The only state in which the source has been checked, in its own words, at the
+ *   level of the actual claim.
+ * - `snippet` — the quote appears only in a search result's snippet for this URL,
+ *   never in the page itself. The words are the search provider's summary of the
+ *   source rather than the source, and no tool ever read the page — so the claim is
+ *   checked against a description of the evidence instead of the evidence.
+ * - `unsupported` — a tool returned this URL, but the quote is not in what it
+ *   returned. A real source attached to words it never said, which is the failure
+ *   URL checking alone cannot see.
+ * - `url_only` — a tool returned this URL and no quote was offered, so only the
+ *   source could be checked, not the claim.
+ * - `unobserved` — no tool returned this URL during the run. A fabricated source.
  */
-export const VerifiedCitationSchema = CitationSchema.extend({ verified: z.boolean() });
+export const CitationGroundingSchema = z.enum([
+  'quoted',
+  'snippet',
+  'unsupported',
+  'url_only',
+  'unobserved',
+]);
+export type CitationGrounding = z.infer<typeof CitationGroundingSchema>;
+
+/**
+ * Where the quote was found, split so the UI can highlight the match without
+ * searching for it again. `match` is the source's own wording, which is not always
+ * byte-identical to the quote the model sent — that is the point of showing it.
+ */
+export const QuoteMatchSchema = z.object({
+  before: z.string(),
+  match: z.string(),
+  after: z.string(),
+});
+export type QuoteMatch = z.infer<typeof QuoteMatchSchema>;
+
+/**
+ * A citation the agent claimed, plus the verdict of the grounding check. Citations
+ * that failed are kept rather than deleted so the UI can show the check doing its
+ * job — a shortened list would hide exactly the thing worth seeing.
+ */
+export const VerifiedCitationSchema = CitationSchema.extend({
+  grounding: CitationGroundingSchema,
+  /** The passage the quote matched, in context. Set on `quoted` and `snippet`. */
+  quoteMatch: QuoteMatchSchema.optional(),
+});
 export type VerifiedCitation = z.infer<typeof VerifiedCitationSchema>;
 
 export const RunWarningSchema = z.object({
-  kind: z.enum(['unverified_citation', 'invalid_tool_arguments', 'missing_finish_call']),
+  kind: z.enum([
+    'unverified_citation',
+    'unsupported_quote',
+    'invalid_tool_arguments',
+    'missing_finish_call',
+  ]),
   message: z.string(),
 });
 export type RunWarning = z.infer<typeof RunWarningSchema>;
@@ -104,7 +160,7 @@ export type RunOutcome = z.infer<typeof RunOutcomeSchema>;
 export const RunStatusSchema = z.enum(['running', 'succeeded', 'failed']);
 export type RunStatus = z.infer<typeof RunStatusSchema>;
 
-export const TRACE_SCHEMA_VERSION = 1;
+export const TRACE_SCHEMA_VERSION = 2;
 
 /**
  * The whole run, replayable after it ends. This is the demo artifact — a reviewer

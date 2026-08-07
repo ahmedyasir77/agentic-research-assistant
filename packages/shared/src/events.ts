@@ -16,7 +16,7 @@ import {
  * read. The client checks it and asks the user to reload rather than rendering
  * half-understood events.
  */
-export const EVENT_SCHEMA_VERSION = 1;
+export const EVENT_SCHEMA_VERSION = 2;
 
 /**
  * `seq` is monotonic per run: a client that drops its connection and re-attaches

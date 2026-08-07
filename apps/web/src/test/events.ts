@@ -1,4 +1,9 @@
-import { AgentEventSchema, EVENT_SCHEMA_VERSION, type AgentEvent } from '@ara/shared';
+import {
+  AgentEventSchema,
+  EVENT_SCHEMA_VERSION,
+  type AgentEvent,
+  type CitationGrounding,
+} from '@ara/shared';
 
 /**
  * Test events built through the shared schema rather than as object literals, so a
@@ -33,9 +38,34 @@ export const BUDGETS = {
 
 export const USAGE = { inputTokens: 1200, outputTokens: 300 } as const;
 
+const QUOTE = 'scattering of light by particles much smaller than the wavelength';
+
+/** The citation as the grounding check would have left it in each verdict. */
+function citation(grounding: CitationGrounding): Record<string, unknown> {
+  const base = {
+    id: 1,
+    url: 'https://en.wikipedia.org/wiki/Rayleigh_scattering',
+    title: 'Rayleigh scattering — Wikipedia',
+    grounding,
+  };
+
+  // Both verdicts that found the quote carry the passage it was found in; they
+  // differ in whether that passage came from the page or from a search result.
+  if (grounding === 'quoted' || grounding === 'snippet') {
+    return {
+      ...base,
+      quote: QUOTE,
+      quoteMatch: { before: 'Rayleigh scattering is the ', match: QUOTE, after: ' of the light.' },
+    };
+  }
+
+  // A quote survives on the trace even when it failed — that is what gets shown.
+  return grounding === 'unsupported' ? { ...base, quote: QUOTE } : base;
+}
+
 /** The shape of the recorded demo run, trimmed to one step. */
 export function scriptedRun(
-  overrides: { readonly citationVerified?: boolean } = {},
+  overrides: { readonly citationGrounding?: CitationGrounding } = {},
 ): readonly AgentEvent[] {
   resetSeq();
   return [
@@ -70,14 +100,7 @@ export function scriptedRun(
       usage: USAGE,
       estimatedCostUsd: 0.0135,
       answer: 'Rayleigh scattering. [1]',
-      citations: [
-        {
-          id: 1,
-          url: 'https://en.wikipedia.org/wiki/Rayleigh_scattering',
-          title: 'Rayleigh scattering — Wikipedia',
-          verified: overrides.citationVerified ?? true,
-        },
-      ],
+      citations: [citation(overrides.citationGrounding ?? 'quoted')],
       warnings: [],
     }),
   ];
