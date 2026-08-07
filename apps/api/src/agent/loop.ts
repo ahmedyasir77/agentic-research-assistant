@@ -80,6 +80,19 @@ export async function* runAgent(query: string, deps: AgentDeps): AgentRun {
           { signal: deadline.signal },
         );
       } catch (error) {
+        // The deadline aborting a model call mid-flight is not a provider failure,
+        // and reporting it as one sends the user to "try again in a moment" when the
+        // fix is a longer budget. The signal is the only thing that knows which
+        // happened, because an aborted SDK call throws its own generic error.
+        if (deadline.signal.aborted) {
+          logger.warn({ runId: deps.runId, step }, 'model call cut off by wall-clock budget');
+          return yield* fail(
+            recorder,
+            'budget_exceeded',
+            `Stopped mid-answer: the run hit its ${String(Math.round(policy.maxWallClockMs / 1000))}s time limit while the model was still writing.`,
+            lastText,
+          );
+        }
         logger.error({ runId: deps.runId, step, err: error }, 'model call failed');
         return yield* fail(recorder, 'llm_error', describeError(error), lastText);
       }
