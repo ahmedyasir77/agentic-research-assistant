@@ -7,12 +7,13 @@ import type { ToolInvocation } from '../tools/registry.ts';
 import {
   citesOnlyUnreadSources,
   createEvidence,
-  unsupportedCitations,
+  failedCitations,
+  hasFailures,
   type Evidence,
 } from './citations.ts';
 import { complete, fail, recordStep } from './outcome.ts';
 import { checkBudget, toRunBudgets } from './policy.ts';
-import { buildQuoteNudge, buildSystemPrompt, FINISH_NUDGE, SOURCE_NUDGE } from './prompt.ts';
+import { buildCitationNudge, buildSystemPrompt, FINISH_NUDGE, SOURCE_NUDGE } from './prompt.ts';
 import { RunRecorder } from './recorder.ts';
 import { executeToolCalls } from './toolStep.ts';
 import type { AgentDeps, AgentRun } from './types.ts';
@@ -188,8 +189,9 @@ export async function* runAgent(query: string, deps: AgentDeps): AgentRun {
       recordStep(recorder, clock, step, stepStartedAtMs, text, executed.records, response.usage);
 
       if (executed.finished !== undefined) {
-        // The answer is fine and the sources are real; only the evidence under them
-        // is second-hand or misquoted, and the agent still has budget to go and fix
+        // The answer is fine and the evidence under it is not: a source nothing
+        // returned, a sentence the page does not contain, or a quote taken from a
+        // search summary instead of a page. The agent still has budget to go and fix
         // it. Sending it back costs a step and is capped, so the worst case is one
         // wasted step and the same answer — which the labels would have described
         // anyway.
@@ -261,10 +263,11 @@ function* settle(
  * side-effect free: nothing is recorded, no warning is raised, and the payload is
  * parsed again for real if the run does go on to finish.
  *
- * A quote that is not in the page outranks an answer built from snippets. Both are
- * weak evidence, but only one is an attribution the source never made, and the
- * nudge budget buys a single correction — so it is spent on the citation that says
- * something false rather than the one that is merely second-hand.
+ * A citation that failed a rung outranks an answer built from snippets. All three
+ * are weak evidence, but two of them are attributions the source never made — a URL
+ * nothing returned, or a sentence the page does not contain — and the nudge budget
+ * buys one correction, so it is spent on the citations that say something false
+ * rather than the one that is merely second-hand.
  */
 function correctionFor(finished: ToolInvocation, evidence: Evidence): string | undefined {
   if (finished.outcome.status !== 'ok') return undefined;
@@ -272,8 +275,8 @@ function correctionFor(finished: ToolInvocation, evidence: Evidence): string | u
   const payload = FinishPayloadSchema.safeParse(finished.outcome.output);
   if (!payload.success) return undefined;
 
-  const failed = unsupportedCitations(payload.data.citations, evidence);
-  if (failed.length > 0) return buildQuoteNudge(failed);
+  const failed = failedCitations(payload.data.citations, evidence);
+  if (hasFailures(failed)) return buildCitationNudge(failed);
 
   return citesOnlyUnreadSources(payload.data.citations, evidence) ? SOURCE_NUDGE : undefined;
 }

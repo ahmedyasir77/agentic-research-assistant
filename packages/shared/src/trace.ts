@@ -67,6 +67,18 @@ export const RunStepSchema = z.object({
 });
 export type RunStep = z.infer<typeof RunStepSchema>;
 
+/**
+ * The longest a citation quote may be.
+ *
+ * Lives here rather than beside `finish`, because it is not only that tool's
+ * business. It is the cap the model is told about, the length an over-long quote is
+ * clamped to — and the distance consecutive `http_get` reads overlap by, so that a
+ * sentence lying across the cut between two reads is still whole in one of them. A
+ * second copy of this number in the fetch tool would be a silent way for the
+ * grounding check to start rejecting quotes that really are in the page.
+ */
+export const MAX_QUOTE_CHARS = 500;
+
 export const CitationSchema = z.object({
   id: z.number().int().positive(),
   url: z.url(),
@@ -79,7 +91,7 @@ export const CitationSchema = z.object({
    * the validator. A `finish` call that fails validation costs a step and teaches
    * the model nothing — see the note on the citations array in tools/finish.ts.
    */
-  quote: z.string().max(500).optional(),
+  quote: z.string().max(MAX_QUOTE_CHARS).optional(),
 });
 export type Citation = z.infer<typeof CitationSchema>;
 

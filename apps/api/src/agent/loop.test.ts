@@ -342,9 +342,12 @@ describe('scenario 5 — the model will not call finish', () => {
   });
 
   it('accepts a finish call made after the nudge', async () => {
+    // No citations: this run called no tools, so any URL it cited would be one
+    // nothing returned, and the citation correction — not the prose nudge under
+    // test — would be what shaped the run.
     const agentDeps = deps([
       turn.text('The sky is blue because of scattering.'),
-      finishCall('The sky is blue because of scattering. [1]', [SOURCE]),
+      finishCall('The sky is blue because of scattering.', []),
     ]);
 
     const { trace } = await run('why is the sky blue', agentDeps);
@@ -369,7 +372,7 @@ describe('scenario 5 — the model will not call finish', () => {
   it('counts the nudged turn as a step, in the trace as well as the stream', async () => {
     const agentDeps = deps([
       turn.text('The sky is blue because of scattering.'),
-      finishCall('The sky is blue because of scattering. [1]', [SOURCE]),
+      finishCall('The sky is blue because of scattering.', []),
     ]);
 
     const { events, trace } = await run('why is the sky blue', agentDeps);
@@ -385,18 +388,59 @@ describe('scenario 5 — the model will not call finish', () => {
 });
 
 describe('scenario 6 — citations that do not hold up', () => {
-  it('marks a citation no tool returned as unverified and warns', async () => {
-    const invented = 'https://plausible-but-invented.example.com/paper';
+  const invented = 'https://plausible-but-invented.example.com/paper';
+  const search = turn.toolCall([
+    { id: 'c1', name: 'web_search', input: { query: 'why is the sky blue' } },
+  ]);
+  const inventedFinish = finishCall('Scattering explains it. [1][2]', [SOURCE, invented]);
+
+  it('hands an invented source back to the agent instead of shipping it', async () => {
     const agentDeps = deps([
-      turn.toolCall([{ id: 'c1', name: 'web_search', input: { query: 'why is the sky blue' } }]),
-      finishCall('Scattering explains it. [1][2]', [SOURCE, invented]),
+      search,
+      inventedFinish,
+      finishCall('Scattering explains it. [1]', [SOURCE]),
     ]);
+
+    const { trace } = await run('why is the sky blue', agentDeps);
+
+    // The fabricated source never reaches the user at all: the loop caught it while
+    // the agent still had steps, and the agent dropped it. This is the failure the
+    // check exists for, so it is the one least worth shipping with a label on it.
+    expect(trace.status).toBe('succeeded');
+    expect(trace.citations).toStrictEqual([
+      // Real source, no quote: the URL was checked and the claim was not.
+      { id: 1, url: SOURCE, title: 'Source 1', grounding: 'url_only' },
+    ]);
+    expect(trace.warnings).toStrictEqual([]);
+  });
+
+  it('names the invented url in the correction it sends back', async () => {
+    const llm = createFakeLlmClient([
+      search,
+      inventedFinish,
+      finishCall('Scattering explains it. [1]', [SOURCE]),
+    ]);
+
+    await run('why is the sky blue', deps([], { llm }));
+
+    // A correction that does not say which URL failed is a correction the agent has
+    // to guess at, and it has only one turn to spend guessing.
+    const correction = JSON.stringify(llm.requests.at(-1)?.messages);
+    expect(correction).toContain(invented);
+    expect(correction).toContain('No tool returned these URLs');
+  });
+
+  it('lets an invented source stand, labelled, rather than looping on it', async () => {
+    // A model that will not take the correction still has to end the run, and the
+    // label is what carries the failure once the nudge has been spent.
+    const agentDeps = deps([search, inventedFinish, inventedFinish], {
+      policy: { maxNudges: 1 },
+    });
 
     const { events, trace } = await run('why is the sky blue', agentDeps);
 
     expect(trace.status).toBe('succeeded');
     expect(trace.citations).toStrictEqual([
-      // Real source, no quote: the URL was checked and the claim was not.
       { id: 1, url: SOURCE, title: 'Source 1', grounding: 'url_only' },
       { id: 2, url: invented, title: 'Source 2', grounding: 'unobserved' },
     ]);
@@ -406,6 +450,31 @@ describe('scenario 6 — citations that do not hold up', () => {
 
     const completed = events.at(-1);
     expect(completed?.type === 'run.completed' && completed.warnings).toHaveLength(1);
+  });
+
+  it('reports the same invented source cited twice as one warning', async () => {
+    // The reported shape: one bad source behind two claims rendered the identical
+    // sentence twice, which said there was a problem and doubled the noise about it.
+    const twice = turn.toolCall([
+      {
+        id: 'call_finish',
+        name: 'finish',
+        input: {
+          answer: 'Both claims. [2][2]',
+          citations: [
+            { id: 2, url: invented, title: 'Source 2' },
+            { id: 2, url: invented, title: 'Source 2' },
+          ],
+        },
+      },
+    ]);
+    const agentDeps = deps([search, twice, twice], { policy: { maxNudges: 1 } });
+
+    const { trace } = await run('why is the sky blue', agentDeps);
+
+    // Both citations are kept and labelled; only the repeated warning is collapsed.
+    expect(trace.citations).toHaveLength(2);
+    expect(trace.warnings.filter((entry) => entry.kind === 'unverified_citation')).toHaveLength(1);
   });
 
   it('does not let a page that refused to load count as a source that was read', async () => {
@@ -461,6 +530,26 @@ describe('scenario 6 — citations that do not hold up', () => {
     // user at all — the failure never becomes a warning about a finished answer.
     expect(trace.status).toBe('succeeded');
     expect(trace.citations[0]?.grounding).toBe('quoted');
+    expect(trace.warnings).toStrictEqual([]);
+  });
+
+  it('reports a fabricated source and a misquote in the same correction', async () => {
+    const llm = createFakeLlmClient([
+      read,
+      finishCall('Both wrong. [1][2]', [{ url: SOURCE, quote: misquote }, invented]),
+      finishCall('The ratio is 5.5. [1]', [{ url: SOURCE, quote: PAGE_SENTENCE }]),
+    ]);
+
+    const { trace } = await run('why is the sky blue', deps([], { llm }));
+
+    // One nudge, both failures. The agent has to reissue the whole finish payload
+    // either way, so correcting one and shipping the other fixes half the answer at
+    // full price — and the nudge budget has nothing left to fix the rest with.
+    const correction = JSON.stringify(llm.requests.at(-1)?.messages);
+    expect(correction).toContain(invented);
+    expect(correction).toContain('are not in it, character for character');
+
+    expect(trace.status).toBe('succeeded');
     expect(trace.warnings).toStrictEqual([]);
   });
 

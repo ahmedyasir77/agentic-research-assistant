@@ -97,7 +97,9 @@ describe('http_get', () => {
     // the next read picks up.
     expect(output.offset).toBe(0);
     expect(output.totalChars).toBe(20_000);
-    expect(output.nextOffset).toBe(12_000);
+    // Back from the cut by the quote cap, not to it: the next read has to include
+    // the sentence this one ran through the middle of.
+    expect(output.nextOffset).toBe(11_500);
   });
 
   it('reads on from an offset so a long page can be finished', async () => {
@@ -114,10 +116,44 @@ describe('http_get', () => {
       ctx,
     );
 
-    expect(second.offset).toBe(12_000);
+    expect(second.offset).toBe(11_500);
     expect(second.textExcerpt).toContain('The endowment is larger than');
     expect(second.truncated).toBe(false);
     expect(second.nextOffset).toBeUndefined();
+  });
+
+  it('overlaps consecutive reads, so no sentence falls in the gap between them', async () => {
+    // The failure this exists for: a page cut at a raw character count splits a
+    // sentence, the halves reach the grounding check as separate evidence, and a
+    // quote spanning them matches neither — the agent is told the page does not
+    // contain words that are plainly in it.
+    const sentence =
+      'In a University of Chicago study on sleep deprivation, the volunteers who stayed awake ' +
+      'showed measurable metabolic changes within a week.';
+    const cut = 40; // How much of the sentence lands in the first excerpt.
+    const page = `${'x'.repeat(12_000 - cut)}${sentence}${'y'.repeat(2_000)}`;
+    const tool = createHttpGetTool(deps(page, 'text/plain'));
+
+    const first = await tool.execute({ url: 'https://example.com/long' }, ctx);
+    const second = await tool.execute(
+      { url: 'https://example.com/long', offset: first.nextOffset },
+      ctx,
+    );
+
+    // Split by the first read, whole in the second. Every quote the schema permits
+    // is at most the overlap long, so this holds for all of them, not just this one.
+    expect(first.textExcerpt).not.toContain(sentence);
+    expect(second.textExcerpt).toContain(sentence);
+  });
+
+  it('does not hand back an offset before the read that produced it', async () => {
+    // Defensive: were an excerpt ever shorter than the overlap, backing off by the
+    // full overlap would point behind the current read and the model would loop
+    // over the same text instead of finishing the page.
+    const tool = createHttpGetTool(deps('x'.repeat(20_000), 'text/plain'));
+    const output = await tool.execute({ url: 'https://example.com/long', offset: 7_000 }, ctx);
+
+    expect(output.nextOffset).toBeGreaterThan(output.offset);
   });
 
   it('returns the whole of a page that fits, and says there is no more', async () => {

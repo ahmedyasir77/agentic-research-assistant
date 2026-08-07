@@ -1,5 +1,6 @@
 import type { Citation } from '@ara/shared';
 
+import type { FailedCitations } from './citations.ts';
 import type { AgentPolicy } from './policy.ts';
 
 /**
@@ -30,8 +31,10 @@ export function buildSystemPrompt(policy: AgentPolicy): string {
     '  and a turn without a tool call wastes a step.',
     '- This holds even when the question needed no research. Answer inside finish, with an empty',
     '  citations list, rather than replying directly.',
-    '- Cite only URLs that appeared in a tool result during this run. Citations are checked',
-    '  against what the tools actually returned, and anything else is flagged as unverified.',
+    '- Cite only URLs that appeared in a tool result during this run, copied out of that result',
+    '  character for character. A URL is not something to reconstruct from a tool name, a search',
+    '  query, or memory of where the page lives — citations are checked against what the tools',
+    '  actually returned, and anything else is flagged as unverified.',
     '- Give every citation a quote: the sentence in that source which carries the claim, copied',
     '  exactly from the tool result. It is matched against that text character for character, so',
     '  copy rather than recall — a paraphrase is flagged as unsupported even when it is fair.',
@@ -83,26 +86,62 @@ export const SOURCE_NUDGE =
   'that needs to come from the sources themselves.';
 
 /**
- * Sent when a `finish` call attributes quotes to pages that do not contain them.
+ * Sent when a `finish` call cites sources that did not survive the grounding check.
  *
- * This is the correction that was missing. The grounding check ran only once the
- * answer was final, so the one party who could still fix a bad quote — the agent,
- * with steps and an `offset` argument left — was the only party never told. The
- * failure went to the user as a warning about a finished run instead.
+ * This is the correction that was missing. The check ran only once the answer was
+ * final, so the one party who could still fix a bad citation — the agent, with steps
+ * and an `offset` argument left — was the only party never told. The failure went to
+ * the user as a warning about a finished run instead.
  *
- * The failing quotes are listed rather than merely counted, because the common shape
- * is one source cited for several claims: without the text, every line names the
- * same id and the same URL and none of them says which sentence to go and fix.
+ * Both failures are reported in one message rather than one per turn. The nudge
+ * budget is small and shared, and the agent has to reissue the whole `finish` payload
+ * either way, so spending a turn on the fabricated URL and shipping the misquote —
+ * or the reverse — fixes half the answer at full price.
+ *
+ * The failing citations are listed rather than merely counted, because the common
+ * shape is one source cited for several claims: without the detail, every line names
+ * the same id and the same URL and none of them says which one to go and fix.
  */
-export function buildQuoteNudge(failed: readonly Citation[]): string {
-  const listed = failed
-    .map((citation) => `- [${String(citation.id)}] ${citation.url} — “${citation.quote ?? ''}”`)
-    .join('\n');
-
+export function buildCitationNudge(failed: FailedCitations): string {
   return [
-    'Those citations were checked against the text these pages returned during this run, and',
-    'these quotes are not in it, character for character:',
-    listed,
+    ...(failed.unobserved.length === 0 ? [] : [unobservedSection(failed.unobserved)]),
+    ...(failed.unsupported.length === 0 ? [] : [unsupportedSection(failed.unsupported)]),
+    'Then call finish again with the corrected citations. Keep the rest of the answer as it is.',
+  ].join('\n\n');
+}
+
+/**
+ * The URL rung. Deliberately concrete about how a made-up URL gets made, because the
+ * failure does not feel like invention from the inside: the observed cases are a page
+ * recalled from training and a URL assembled out of the tool's own name, and a model
+ * told only "that source is not real" has no reason to think either of those was what
+ * it did.
+ */
+function unobservedSection(failed: readonly Citation[]): string {
+  return [
+    'No tool returned these URLs during this run, so they are not sources this run has:',
+    listed(failed),
+    '',
+    'A cited URL has to be one you copied out of a tool result. The ways this usually goes wrong:',
+    'the page is remembered from training rather than fetched here; the URL was assembled out of a',
+    'tool name or a search query instead of read off a result; or a real URL was retyped with a',
+    'changed path. None of them can be checked against anything, and each one reaches the reader',
+    'marked unverified. For each:',
+    '1. If a tool did return a page supporting the claim, copy that URL out of the tool result',
+    '   exactly, and quote the text that came back with it.',
+    '2. If no tool has returned such a page, go and get one: web_search for it, read it with',
+    '   http_get, then cite the URL that came back.',
+    '3. If neither is possible, the claim has no source in this run. Drop it, or say plainly that',
+    '   the sources do not settle it.',
+  ].join('\n');
+}
+
+/** The quote rung: a real source, and words it never said. */
+function unsupportedSection(failed: readonly Citation[]): string {
+  return [
+    'These citations were checked against the text those pages returned during this run, and the',
+    'quotes are not in it, character for character:',
+    listed(failed),
     '',
     'That is usually one of two things: the sentence was recalled rather than copied, or it is',
     'further down a page whose read came back truncated. Fix it by reading, not by rewording —',
@@ -114,6 +153,15 @@ export function buildQuoteNudge(failed: readonly Citation[]): string {
     '   to quote, pick a shorter run of words you can find verbatim rather than reconstructing one.',
     '3. If the page does not say it after that, the claim is not supported. Drop the claim, or cite',
     '   a source that does say it.',
-    'Then call finish again with the corrected citations. Keep the rest of the answer as it is.',
   ].join('\n');
+}
+
+/** A quote is shown when there is one — an unobserved citation need not carry one. */
+function listed(citations: readonly Citation[]): string {
+  return citations
+    .map((citation) => {
+      const quote = citation.quote === undefined ? '' : ` — “${citation.quote}”`;
+      return `- [${String(citation.id)}] ${citation.url}${quote}`;
+    })
+    .join('\n');
 }

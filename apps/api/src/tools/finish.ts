@@ -1,4 +1,4 @@
-import { CitationSchema } from '@ara/shared';
+import { CitationSchema, MAX_QUOTE_CHARS } from '@ara/shared';
 import { z } from 'zod';
 
 import type { Tool } from './types.ts';
@@ -28,8 +28,6 @@ function parseIfJsonArray(value: unknown): unknown {
     return value;
   }
 }
-
-const MAX_QUOTE_CHARS = 500;
 
 /**
  * Trims an over-long quote rather than rejecting the call that carried it.

@@ -4,10 +4,10 @@ import { describe, expect, it } from 'vitest';
 import {
   collectEvidence,
   createEvidence,
+  failedCitations,
   normaliseText,
   normaliseUrl,
   reviewCitations,
-  unsupportedCitations,
   type Evidence,
 } from './citations.ts';
 
@@ -269,10 +269,10 @@ describe('reviewCitations', () => {
   });
 });
 
-describe('unsupportedCitations', () => {
-  it('returns only the citations whose quotes are not in the page', () => {
+describe('failedCitations', () => {
+  it('separates a url nothing returned from a quote the page does not contain', () => {
     const evidence = evidenceFrom(PAGE);
-    const failed = unsupportedCitations(
+    const failed = failedCitations(
       [
         cite(1, SOURCE, 'The scattered intensity is inversely proportional'),
         cite(2, SOURCE, 'Scattering follows the sixth power of the wavelength.'),
@@ -282,17 +282,102 @@ describe('unsupportedCitations', () => {
       evidence,
     );
 
-    // Only the misquote. A grounded quote is fine, a url no tool returned is a
-    // different failure the agent cannot fix by re-reading, and a citation with no
-    // quote was never a claim about the page's wording.
-    expect(failed.map((citation) => citation.id)).toStrictEqual([2]);
+    // The two failures are told apart because their fixes are different: one is
+    // re-read and copied, the other cannot be re-read at all. A grounded quote is
+    // fine, and a citation with no quote was never a claim about the page's wording.
+    expect(failed.unsupported.map((citation) => citation.id)).toStrictEqual([2]);
+    expect(failed.unobserved.map((citation) => citation.id)).toStrictEqual([3]);
   });
 
-  it('finds nothing to correct when every quote holds up', () => {
+  it('finds nothing to correct when every citation holds up', () => {
     const evidence = evidenceFrom(PAGE);
     const held = cite(1, SOURCE, 'The scattered intensity is inversely proportional');
 
-    expect(unsupportedCitations([held], evidence)).toStrictEqual([]);
+    expect(failedCitations([held], evidence)).toStrictEqual({ unobserved: [], unsupported: [] });
+  });
+});
+
+describe('duplicate warnings', () => {
+  it('reports one warning for the same invented source cited twice', () => {
+    const invented = 'https://example.com/never-returned';
+    const review = reviewCitations([cite(2, invented), cite(2, invented)], evidenceFrom(PAGE));
+
+    // Both citations are kept and labelled — nothing that failed is deleted. But the
+    // warning built from an id and a URL is byte-identical for both, and the same
+    // sentence twice says nothing the first one did not.
+    expect(review.citations.map((citation) => citation.grounding)).toStrictEqual([
+      'unobserved',
+      'unobserved',
+    ]);
+    expect(review.warnings).toHaveLength(1);
+  });
+
+  it('still reports both when one source fails two different quotes', () => {
+    const review = reviewCitations(
+      [
+        cite(1, SOURCE, 'Scattering follows the sixth power of the wavelength.'),
+        cite(1, SOURCE, 'Red light scatters twice as far as blue light does.'),
+      ],
+      evidenceFrom(PAGE),
+    );
+
+    // The quote is in the message, so these are two distinguishable failures rather
+    // than one repeated — deduplicating on the text must not collapse them.
+    expect(review.warnings).toHaveLength(2);
+  });
+});
+
+describe('a page read in more than one piece', () => {
+  // Two `http_get` results for one URL, shaped as the tool returns them. The reads
+  // overlap by the quote cap, which is what makes the straddling sentence whole in
+  // the second one — see OVERLAP_CHARS in tools/httpGet.ts.
+  const SENTENCE =
+    'In a University of Chicago study on sleep deprivation, the volunteers who stayed ' +
+    'awake showed measurable metabolic changes within a week.';
+
+  const EXCERPT = 12_000;
+  const OVERLAP = 500;
+  // The sentence sits 40 characters before the first read's cut, so that read ends
+  // in the middle of it — the shape that used to be unquotable.
+  const PAGE = `${'x'.repeat(EXCERPT - 40)}${SENTENCE}${'y'.repeat(2_000)}`;
+
+  const chunk = (excerpt: string, offset: number): JsonValue => ({
+    status: 200,
+    contentType: 'text/plain',
+    textExcerpt: excerpt,
+    truncated: true,
+    offset,
+    totalChars: PAGE.length,
+    finalUrl: SOURCE,
+  });
+
+  it('grounds a quote the first read cut in half', () => {
+    const evidence = evidenceFrom(
+      chunk(PAGE.slice(0, EXCERPT), 0),
+      chunk(PAGE.slice(EXCERPT - OVERLAP), EXCERPT - OVERLAP),
+    );
+
+    // The evidence segments are still kept apart — nothing here joins them, which is
+    // what stops a quote spanning a title and a snippet. The overlap means it does
+    // not have to: the sentence is whole inside the second read on its own.
+    const review = reviewCitations([cite(1, SOURCE, SENTENCE)], evidence);
+
+    expect(review.citations[0]?.grounding).toBe('quoted');
+    expect(review.warnings).toStrictEqual([]);
+  });
+
+  it('still refuses a quote spanning two reads that do not overlap', () => {
+    // The safety property the overlap must not cost: two independently returned
+    // strings are never concatenated into a sentence neither of them contained. Take
+    // the overlap away and the same quote is correctly rejected again.
+    const evidence = evidenceFrom(
+      chunk(PAGE.slice(0, EXCERPT), 0),
+      chunk(PAGE.slice(EXCERPT), EXCERPT),
+    );
+
+    expect(reviewCitations([cite(1, SOURCE, SENTENCE)], evidence).citations[0]?.grounding).toBe(
+      'unsupported',
+    );
   });
 });
 

@@ -93,10 +93,19 @@ export interface CitationReview {
 export function reviewCitations(claimed: readonly Citation[], evidence: Evidence): CitationReview {
   const reviewed = claimed.map((citation) => review(citation, evidence));
 
-  return {
-    citations: reviewed.map((entry) => entry.citation),
-    warnings: reviewed.flatMap((entry) => (entry.warning === undefined ? [] : [entry.warning])),
-  };
+  // Identical messages are collapsed, because a warning repeated verbatim carries
+  // nothing the first one did not. The quote failures are already distinguishable
+  // by construction — `shorten` puts the quote in the message for exactly that
+  // reason — but a fabricated URL has only an id and a URL to describe it, so the
+  // same source cited twice produced the same sentence twice and read like a bug.
+  const seen = new Set<string>();
+  const warnings = reviewed.flatMap((entry) => {
+    if (entry.warning === undefined || seen.has(entry.warning.message)) return [];
+    seen.add(entry.warning.message);
+    return [entry.warning];
+  });
+
+  return { citations: reviewed.map((entry) => entry.citation), warnings };
 }
 
 /**
@@ -123,22 +132,40 @@ export function citesOnlyUnreadSources(claimed: readonly Citation[], evidence: E
 }
 
 /**
- * The citations whose quotes did not hold up, so the loop can hand them back.
+ * The citations that failed a rung, grouped by which one, so the loop can hand them
+ * back while the agent can still act.
  *
  * The check runs in `complete`, which is after the answer is fixed and too late for
  * the agent to do anything — the failure reaches the user and never reaches the
- * model. This is the same verdict asked for early enough to be actionable: a quote
- * that is not in the page is usually a sentence recalled instead of copied, or one
- * below the cut of a truncated read, and both are things the agent can still fix
- * with a step and an `offset`.
+ * model. This is the same verdict asked for early enough to be actionable.
+ *
+ * Grouped rather than pooled because the two failures have nothing in common except
+ * that a citation is wrong. A quote that is not in the page is a sentence recalled
+ * instead of copied, or one below the cut of a truncated read, and the fix is to
+ * read again with an `offset`. A URL no tool returned cannot be fixed by re-reading
+ * at all — there is nothing to re-read — and the fix is to cite a page the run
+ * actually has, or go and get one. Telling the agent to do the first when it needs
+ * the second is a wasted step and a wasted nudge.
  */
-export function unsupportedCitations(
-  claimed: readonly Citation[],
-  evidence: Evidence,
-): readonly VerifiedCitation[] {
-  return reviewCitations(claimed, evidence).citations.filter(
-    (citation) => citation.grounding === 'unsupported',
-  );
+export interface FailedCitations {
+  /** Citations naming a URL no tool returned. Fabricated sources. */
+  readonly unobserved: readonly VerifiedCitation[];
+  /** Citations attributing a quote to a real source that does not contain it. */
+  readonly unsupported: readonly VerifiedCitation[];
+}
+
+export function failedCitations(claimed: readonly Citation[], evidence: Evidence): FailedCitations {
+  const { citations } = reviewCitations(claimed, evidence);
+
+  return {
+    unobserved: citations.filter((citation) => citation.grounding === 'unobserved'),
+    unsupported: citations.filter((citation) => citation.grounding === 'unsupported'),
+  };
+}
+
+/** Whether anything in a `finish` payload is worth sending the agent back for. */
+export function hasFailures(failed: FailedCitations): boolean {
+  return failed.unobserved.length > 0 || failed.unsupported.length > 0;
 }
 
 interface ReviewedCitation {

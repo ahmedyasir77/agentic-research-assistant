@@ -11,10 +11,11 @@ import type { Config } from '../config/env.ts';
  */
 export interface AgentPolicy extends RunBudgets {
   /**
-   * How many times the loop will send a correction back to the model — either to
-   * use the `finish` tool instead of plain prose, or to re-read a source instead of
-   * shipping a quote that is not in it. Two, not one: a quote nudge names the exact
-   * sentence that failed and the fix is mechanical (read again, copy exactly), which
+   * How many times the loop will send a correction back to the model — to use the
+   * `finish` tool instead of plain prose, to cite a source the run actually has
+   * instead of one nothing returned, or to re-read a source instead of shipping a
+   * quote that is not in it. Two, not one: a citation nudge names the exact source
+   * that failed and the fix is mechanical (read again, copy exactly), which
    * a model routinely gets right on a second attempt but not always on the first.
    * The budget is shared with the prose correction so a run that needed both still
    * pays for only two extra steps, not four.

@@ -1,3 +1,4 @@
+import { MAX_QUOTE_CHARS } from '@ara/shared';
 import { z } from 'zod';
 
 import {
@@ -23,6 +24,26 @@ import { ToolExecutionError, type Tool } from './types.ts';
  */
 const MAX_EXCERPT_CHARS = 12_000;
 
+/**
+ * How far a continuing read starts back from where the previous one stopped.
+ *
+ * Without it there is exactly one unquotable sentence at every excerpt boundary, and
+ * it fails in the way that looks most like the agent lying. A long page is cut at a
+ * raw character count, so the cut lands mid-sentence; the two halves reach the
+ * grounding check as separate pieces of evidence, and that check will not match a
+ * quote across two strings — deliberately, because joining independently returned
+ * strings is how you manufacture a sentence no source ever contained. So an agent
+ * that read the whole page and copied a sentence straddling the cut was told the
+ * source "does not contain" words that are plainly in it.
+ *
+ * Overlapping by the quote cap closes it outright rather than making it rarer: a
+ * quote is at most `MAX_QUOTE_CHARS`, so one that ends after the cut must start
+ * within `MAX_QUOTE_CHARS` of it, which is inside the next read. Every quote the
+ * schema permits is therefore whole in at least one excerpt. The cost is re-reading
+ * 500 of every 12,000 characters.
+ */
+const OVERLAP_CHARS = MAX_QUOTE_CHARS;
+
 const InputSchema = z.object({
   url: z.url().max(2_048).describe('An absolute http(s) URL, normally one web_search returned.'),
   offset: z
@@ -33,7 +54,8 @@ const InputSchema = z.object({
     .describe(
       'Where to start reading, in characters. Omit for the beginning of the page. If a previous ' +
         'read of this URL came back with truncated=true, call again with offset set to that ' +
-        "read's nextOffset to continue from where it stopped.",
+        "read's nextOffset to continue. The excerpts overlap slightly, so a sentence the cut " +
+        'ran through arrives whole in the second one — quote it from there.',
     ),
 });
 
@@ -94,7 +116,10 @@ export function createHttpGetTool(
           truncated: response.truncated || more,
           offset: start,
           totalChars: text.length,
-          ...(more ? { nextOffset: end } : {}),
+          // Never back past `start`: on a page shorter than the overlap that would
+          // hand back an offset before this read began, and the model would loop
+          // over the same excerpt instead of finishing.
+          ...(more ? { nextOffset: Math.max(start, end - OVERLAP_CHARS) } : {}),
           finalUrl: response.finalUrl,
         };
       } catch (error) {
