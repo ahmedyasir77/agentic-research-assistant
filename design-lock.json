@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "designs": {
+    "minimal": {
+      "source": "cola-runner/awesome-tui-design",
+      "sourcePath": "designs/minimal/DESIGN.md",
+      "outputPath": "DESIGN.md",
+      "ref": "HEAD",
+      "commitSha": "445d993e0979a1849ae5f69bd6c07a8ce4098311",
+      "contentHash": "e7007d490f044bd31452bd7df2e1833bf03f6e16068a34be8279711585bd7030",
+      "fetchedAt": "2026-08-07T09:57:43.639Z"
+    }
+  }
+}
