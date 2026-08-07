@@ -29,6 +29,37 @@ function parseIfJsonArray(value: unknown): unknown {
   }
 }
 
+const MAX_QUOTE_CHARS = 500;
+
+/**
+ * Trims an over-long quote rather than rejecting the call that carried it.
+ *
+ * `CitationSchema` caps a quote at 500 characters, and that cap is worth keeping —
+ * a citation is meant to point at the sentence carrying the claim, not at half the
+ * page. But enforcing it by rejection is the expensive way to hold that line: the
+ * error names one citation and throws away all of them, along with the answer, so
+ * the model has to regenerate the whole `finish` payload to fix a few characters at
+ * the end of one quote. A real run spent its last two steps that way and died
+ * holding a finished answer.
+ *
+ * Truncating is safe for the check that matters. Quotes are located by substring
+ * search against the normalised text a tool returned, so a prefix of a quote that
+ * was really in the page is still in the page — an over-copied quote stays
+ * `quoted`, and a recalled one stays `unsupported`. The cut can land mid-word,
+ * which is why the cap is a length the model is also told about: this is the floor
+ * under a mistake, not the intended path.
+ */
+function clampQuotes(value: unknown): unknown {
+  if (!Array.isArray(value)) return value;
+
+  return value.map((item: unknown) => {
+    if (typeof item !== 'object' || item === null) return item;
+    const { quote } = item as { quote?: unknown };
+    if (typeof quote !== 'string' || quote.length <= MAX_QUOTE_CHARS) return item;
+    return { ...item, quote: quote.slice(0, MAX_QUOTE_CHARS) };
+  });
+}
+
 const InputSchema = z.object({
   answer: z
     .string()
@@ -40,7 +71,7 @@ const InputSchema = z.object({
     ),
   citations: z
     .preprocess(
-      parseIfJsonArray,
+      (value: unknown) => clampQuotes(parseIfJsonArray(value)),
       z
         .array(CitationSchema)
         .max(20)
@@ -55,8 +86,9 @@ const InputSchema = z.object({
         'urls that were not are flagged as unverified. Give each one a quote: the sentence from ' +
         'that source which supports the claim, copied exactly as it appeared in the tool result. ' +
         'Quotes are matched against that text character for character, so a paraphrase or a ' +
-        'remembered wording will be flagged as unsupported. Omit it, or pass an empty array, ' +
-        'when the answer rests on no source.',
+        `remembered wording will be flagged as unsupported. Keep each quote under ${String(MAX_QUOTE_CHARS)} ` +
+        'characters — one sentence, not a paragraph; anything longer is trimmed to that length. ' +
+        'Omit it, or pass an empty array, when the answer rests on no source.',
     ),
 });
 
