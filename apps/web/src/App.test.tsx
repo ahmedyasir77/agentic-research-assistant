@@ -112,13 +112,46 @@ describe('a run, end to end', () => {
     expect(screen.getByText(/Rayleigh_scattering/u)).toBeInTheDocument();
   });
 
-  it('marks a citation the check could not verify, and keeps it', async () => {
+  it('marks a citation whose url no tool returned, and keeps it', async () => {
     const source = await ask();
-    push(source, scriptedRun({ citationVerified: false }));
+    push(source, scriptedRun({ citationGrounding: 'unobserved' }));
 
     expect(screen.getByText('Unverified')).toBeInTheDocument();
     // Kept, not deleted: showing the check catching something is the point.
     expect(screen.getByRole('link', { name: '[1]' })).toBeInTheDocument();
+  });
+
+  it('shows the passage a grounded citation was matched against', async () => {
+    const source = await ask();
+    push(source, scriptedRun());
+
+    // The source's own words, not the model's copy of them — the claim being made
+    // is "these words are in that page", so the page's words are what is shown.
+    expect(screen.getByText('Rayleigh scattering is the', { exact: false })).toBeInTheDocument();
+    expect(screen.getByText('Quoted')).toBeInTheDocument();
+  });
+
+  it('separates a quote found only in a search result from one found in the page', async () => {
+    const source = await ask();
+    push(source, scriptedRun({ citationGrounding: 'snippet' }));
+
+    // Not a failure and not a clean quote either: the source is real and the words
+    // are real, but nothing read the page they are attributed to.
+    expect(screen.getByText('Snippet only')).toBeInTheDocument();
+    expect(screen.getByText('from the search result, not the page')).toBeInTheDocument();
+    expect(screen.queryByText('Quoted')).not.toBeInTheDocument();
+  });
+
+  it('shows the quote that failed, struck through, when the source never said it', async () => {
+    const source = await ask();
+    push(source, scriptedRun({ citationGrounding: 'unsupported' }));
+
+    expect(screen.getByText('Quote not found')).toBeInTheDocument();
+    expect(screen.getByText('not found in this source')).toBeInTheDocument();
+    // The source is real and stays linked; only the words attributed to it failed.
+    expect(
+      screen.getByRole('link', { name: 'Rayleigh scattering — Wikipedia' }),
+    ).toBeInTheDocument();
   });
 });
 

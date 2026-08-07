@@ -17,6 +17,7 @@
   --rule: color-mix(in srgb, var(--muted) 28%, transparent);
   --signal-wash: color-mix(in srgb, var(--signal) 8%, transparent);
   --flag-wash: color-mix(in srgb, var(--flag) 8%, transparent);
+  --muted-wash: color-mix(in srgb, var(--muted) 10%, transparent);
 
   --instrument: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace;
   --voice: ui-sans-serif, system-ui, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;

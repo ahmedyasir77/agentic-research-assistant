@@ -416,9 +416,25 @@ body {
   text-decoration: underline;
 }
 
-.citation--unverified {
+/* Four treatments for five verdicts, ordered so the decoration itself is the
+   ladder: nothing, solid, dotted, dashed. A quoted citation is the unremarkable
+   case and gets no decoration; the two failures are flagged and dashed; the two
+   in between are greyed, because "weaker than it looks" is not the same warning as
+   "wrong" and should not shout like one. */
+.citation--unsupported,
+.citation--unobserved {
   color: var(--flag);
   text-decoration: underline dashed;
+}
+
+.citation--snippet {
+  color: var(--muted);
+  text-decoration: underline solid;
+}
+
+.citation--url_only {
+  color: var(--muted);
+  text-decoration: underline dotted;
 }
 
 .sources {
@@ -430,10 +446,13 @@ body {
 }
 
 .source {
+  font-size: 0.82rem;
+}
+
+.source__head {
   display: flex;
   gap: var(--step);
   align-items: baseline;
-  font-size: 0.82rem;
 }
 
 .source__id {
@@ -448,20 +467,84 @@ body {
   overflow-wrap: anywhere;
 }
 
-/* Unverified sources differ by treatment, not colour alone — a dashed underline
-   and a flag glyph read the same to someone who cannot distinguish the two. */
-.source--unverified .source__link {
+/* Failed sources differ by treatment, not colour alone — a dashed underline and a
+   worded flag read the same to someone who cannot distinguish the two. */
+.source--unsupported .source__link,
+.source--unobserved .source__link {
   color: var(--muted);
   text-decoration-style: dashed;
   text-decoration-color: var(--flag);
 }
 
 .source__flag {
-  color: var(--flag);
   font-size: 0.72rem;
   letter-spacing: 0.06em;
   text-transform: uppercase;
   white-space: nowrap;
+  cursor: help;
+  color: var(--flag);
+}
+
+.source--quoted .source__flag {
+  color: var(--signal);
+}
+
+.source--snippet .source__flag,
+.source--url_only .source__flag {
+  color: var(--muted);
+}
+
+/* The passage from the source itself, under the source it came from. Indented to
+   the width of the "[1]" gutter so it reads as evidence for that line rather than
+   as a new one.
+
+   Left in the instrument face deliberately. `.prose` is the sans-serif exception
+   because it is the app addressing a person; this is a verbatim extract from what a
+   tool returned, which puts it in the same category as the tool payloads above it. */
+.evidence {
+  margin: calc(var(--step) * 0.75) 0 0 calc(var(--step) * 4);
+  padding-left: calc(var(--step) * 1.5);
+  border-left: var(--trace-width) solid var(--rule);
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.55;
+}
+
+.evidence__match {
+  background: var(--signal-wash);
+  color: var(--ink);
+  box-shadow: inset 0 -1px 0 var(--signal);
+}
+
+.evidence--unsupported {
+  border-left-color: var(--flag);
+}
+
+/* A snippet match is a real match, so it is highlighted — but in grey rather than
+   in signal blue, so a glance down the list separates the sources that were read
+   from the ones that were only described. */
+.evidence--snippet .evidence__match {
+  background: var(--muted-wash);
+  box-shadow: inset 0 -1px 0 var(--muted);
+}
+
+.evidence--snippet .evidence__note {
+  color: var(--muted);
+}
+
+/* Struck through rather than merely flagged: the sentence is being shown precisely
+   because it is not evidence, and it should not be quotable off the screen. */
+.evidence__struck {
+  text-decoration: line-through;
+  text-decoration-color: var(--flag);
+}
+
+.evidence__note {
+  display: block;
+  margin-top: calc(var(--step) * 0.5);
+  color: var(--flag);
+  font-family: var(--instrument);
+  font-size: 0.72rem;
 }
 
 .warnings {
