@@ -1,0 +1,58 @@
+# Render blueprint: the same container as Azure, on an instance that costs nothing.
+#
+# Render builds infra/Dockerfile with BuildKit, so the `--mount=type=cache` in the
+# deps stage works there exactly as it does locally, and the image that ships is the
+# one CI already built on the pull request.
+#
+# The tradeoff of the free plan, stated once so it is not a surprise: an instance
+# sleeps after 15 minutes without inbound traffic and takes about a minute to wake,
+# so the first run after a quiet spell is slow. Everything after it is not.
+
+services:
+  - type: web
+    # Becomes https://ara-research.onrender.com. The subdomain is global across
+    # every Render account, not just this one, so plain `ara` was gone long ago —
+    # a name already taken gets a random suffix rather than an error.
+    name: ara-research
+    runtime: docker
+    plan: free
+    region: oregon
+
+    dockerfilePath: ./infra/Dockerfile
+    # The Dockerfile's COPY paths are relative to the repository root and the root
+    # .dockerignore is what filters the context — the same contract `az acr build`
+    # relies on, so both deployment paths build byte-identical images.
+    dockerContext: .
+
+    # Liveness only, matching the Dockerfile's HEALTHCHECK and the bicep probe. It
+    # deliberately does not check the model or the search provider.
+    healthCheckPath: /healthz
+
+    # Deploy on green CI rather than on every push, since the pipeline already
+    # runs lint, typecheck, tests and a real docker build. Use `commit` instead if
+    # you would rather ship without waiting for checks.
+    autoDeployTrigger: checksPass
+
+    envVars:
+      # Render's default PORT is 10000 and it will otherwise try to guess the bound
+      # port. Setting it removes the guess: this is the port the Dockerfile EXPOSEs
+      # and the one config/env.ts reads. Express binds every interface by default,
+      # which satisfies Render's requirement to listen on 0.0.0.0.
+      - key: PORT
+        value: '8080'
+
+      # Why this deployment is free to run and not merely free to host: offline
+      # replays recorded turns from fixtures/, makes no network calls, and needs no
+      # API key. Unknown queries fall back to fixtures/llm/default.json, so a
+      # stranger can type anything and still see a complete run.
+      - key: DEMO_MODE
+        value: offline
+      - key: SEARCH_PROVIDER
+        value: fixture
+
+      - key: LOG_LEVEL
+        value: info
+      # Runs started per IP per minute. A public URL deserves a lower ceiling than
+      # a laptop does.
+      - key: RATE_LIMIT_PER_MIN
+        value: '6'
