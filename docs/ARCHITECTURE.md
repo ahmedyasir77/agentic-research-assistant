@@ -45,7 +45,7 @@ sequenceDiagram
     end
 
     L->>T: invoke("finish", {answer, citations})
-    L->>L: verifyCitations(payload, urls tools returned)
+    L->>L: reviewCitations(payload, evidence tools returned)
     S-->>B: run.completed {answer, citations, warnings}
     B->>API: GET /api/runs/:id
     API-->>B: the full RunTrace
@@ -65,8 +65,9 @@ POST itself would have made all of that the client's problem. (ADR-019.)
 turn. Bad model output is a normal Tuesday, not an exception.
 
 **Citations are verified against what the tools returned**, not against the model's
-say-so. The `finish` payload arrives as validated structured data precisely so this
-check is possible — see [Guardrails](#guardrails).
+say-so — the URL against the set they returned, and the quote against the text they
+returned for it. The `finish` payload arrives as validated structured data precisely
+so this check is possible — see [Guardrails](#guardrails).
 
 ---
 
@@ -78,7 +79,7 @@ apps/api/src/
     loop.ts       runAgent(): AsyncGenerator<AgentEvent, RunTrace> — yields events, returns the trace
     outcome.ts    recordStep / complete / fail — the bookkeeping of stopping
     policy.ts     every budget in one object, plus checkBudget
-    citations.ts  the anti-hallucination check
+    citations.ts  the grounding check: evidence collection, url and quote verification
     prompt.ts     the system prompt, and only the system prompt
     recorder.ts   accumulates the RunTrace as the loop runs
     toolStep.ts   executes one turn's tool calls, in parallel, under the per-step cap
@@ -124,8 +125,8 @@ stops it looping forever" is a file rather than a story.
 
 | Guardrail | Where | What it does |
 | --- | --- | --- |
-| Step budget | `agent/policy.ts` | 8 steps. Checked **before** each step, so the run stops with a partial answer rather than spending another model call. |
-| Wall-clock budget | `agent/policy.ts` | 60s, same check, same place. |
+| Step budget | `agent/policy.ts` | 20 steps. Checked **before** each step, so the run stops with a partial answer rather than spending another model call. |
+| Wall-clock budget | `agent/policy.ts` | 180s, same check, same place — plus the same deadline as an `AbortSignal`, so a model call still writing when the budget runs out is cut off and reported as a spent budget rather than a provider failure. |
 | Tool calls per step | `agent/toolStep.ts` | 3. A model that asks for twenty parallel fetches gets three. |
 | Output token cap | `agent/policy.ts` | Passed to the model on every turn. |
 | Nudge limit | `agent/loop.ts` | A model that answers in prose is told once to use `finish`. Twice and the run ends `no_tool_call` — no third try. |
@@ -133,7 +134,8 @@ stops it looping forever" is a file rather than a story.
 | Argument validation | `tools/registry.ts` | Zod parse before any side effect. Failure is a `tool_result`, not a crash. |
 | SSRF guard | `platform/ssrf.ts` | Scheme allowlist, no credentials in URL, DNS resolved and checked against loopback / private / link-local / unique-local — **re-checked after every redirect**. Max 2 redirects, 5s timeout, 1 MB cap enforced by streaming and aborting, content-type allowlist. |
 | No `eval`, ever | `tools/calculator.ts` | An explicit tokenizer and shunting-yard evaluator. A `process.exit(0)` payload is a parse error, and there is a test that says so. |
-| Citation integrity | `agent/citations.ts` | Every URL in the `finish` payload is checked against the set of URLs tools actually returned this run. Unverifiable citations are stripped and surfaced as a warning. |
+| Citation integrity | `agent/citations.ts` | Every URL in the `finish` payload is checked against the set of URLs tools actually returned this run. |
+| Claim grounding | `agent/citations.ts` | Every citation's quote is matched against the text that URL returned — attributed per URL, never pooled, exact after normalising only what is invisible. Each citation is labelled `quoted` / `unsupported` / `url_only` / `unobserved`; the two failing states carry a warning. Nothing is deleted. |
 | Ingress limits | `http/` | 500-character query, 8 KB body, per-IP rate limit on run creation. |
 | Backpressure | `runs/store.ts` | Bounded store with a TTL. At capacity, `POST /api/runs` is `503` — shedding load rather than growing without bound. |
 | Redaction | `platform/redact.ts` | `authorization` and `x-api-key` never reach the log. API keys are a `Secret` type whose `toString` and `toJSON` return `[redacted]`; reading one takes an explicit `.expose()`. |

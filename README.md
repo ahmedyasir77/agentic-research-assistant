@@ -7,14 +7,42 @@ browser as it happens, so the agent's reasoning is something you watch rather th
 something you take on faith.
 
 The interesting part is not the happy path. It is the rails: per-tool timeouts, step
-and wall-clock budgets, SSRF-guarded fetches, schema-validated tool arguments, and a
-citation check that strips any URL the agent did not actually see. **That last one
-is the anti-hallucination check** — a model can write any URL it likes into its
-answer, and this one is cross-checked against the set of URLs the tools really
-returned during the run. Anything that fails is stripped from the answer and
-surfaced in the trace as a warning.
+and wall-clock budgets, SSRF-guarded fetches, schema-validated tool arguments, and
+**a grounding check that holds every citation to the text the tools actually
+returned.**
 
-![The offline demo mid-run: the reason-act timeline, each tool call with its arguments and result, and the cited answer.](docs/demo.png)
+That check has three rungs. The first is the URL: a model can write any link it likes
+into an answer, so each one is cross-checked against the set of URLs the tools really
+returned during the run. The second is the one that matters — every citation carries
+the sentence from that source which supports the claim, and that sentence is matched
+against the text that URL actually returned. A paraphrase does not match. That is
+deliberate: a real source stapled to words it never contained is a worse failure than
+an invented URL, because the link resolves and the page looks right.
+
+The third rung is where that text came from. A search snippet and a page body are
+both strings attached to a URL, so an agent can satisfy the quote check without ever
+opening the source — by quoting the search engine's summary of it. Every tool
+declares what its output is worth as evidence, that provenance rides along with the
+matched text, and a quote found only in a snippet is labelled as one.
+
+Telling the model to read before citing does not survive contact with a snippet that
+already contains the answer: fetching is then pure cost against a stated budget, and
+both models I tried skipped it. So an answer whose quotes all came from snippets is
+handed back once, with the correction, while there is still budget to act on it. One
+correction, then the run stands and the labels carry the rest.
+
+Nothing that fails is deleted. Each citation is labelled with what held up — quoted,
+snippet only, quote not found, source only, unverified — and anything that failed
+puts a warning on the run. A shortened source list would hide the most informative
+thing on the screen.
+
+![The offline demo mid-run: the reason-act timeline, each tool call with its arguments and result, and the cited answer with the passage each citation was matched against.](docs/demo.png)
+
+And the check catching something. Same page, same run, two verdicts — citation [2]
+quotes a real source for a sentence with the agent's own number substituted into it,
+and the passage under citation [1] shows the number the page actually gives:
+
+![Two citations to the same Wikipedia page. The first is marked Quoted, with the matched sentence highlighted in its surrounding text. The second is marked "Quote not found", with the failing quote struck through and a warning naming it.](docs/demo-grounding.png)
 
 ---
 
@@ -29,8 +57,10 @@ pnpm demo          # → http://localhost:8080
 
 That is the whole demo. `DEMO_MODE=offline` replays recorded model turns and
 recorded search results through the **real** agent loop, the real tools, the real
-SSRF guard and the real citation check — offline mode swaps transports, not
-guardrails. Click "Why is the sky blue?" and watch four steps run.
+SSRF guard and the real grounding check — offline mode swaps transports, not
+guardrails. Click "Why is the sky blue?" and watch four steps run, then click
+"How much more is blue light scattered than red?" and watch the grounding check
+catch a real page quoted for a sentence it never contained.
 
 To point it at the real APIs instead:
 
@@ -62,7 +92,7 @@ flowchart TB
     subgraph agent["Agent — no I/O, fully injected"]
         LOOP["loop.ts<br/>AsyncGenerator&lt;AgentEvent, RunTrace&gt;"]
         POL["policy.ts<br/>steps · wall clock · calls per step"]
-        CIT["citations.ts<br/>verify against what tools returned"]
+        CIT["citations.ts<br/>url + quote vs what tools returned"]
         REG["ToolRegistry<br/>Zod in · ToolOutcome out · never throws"]
     end
 
@@ -105,9 +135,7 @@ whole agent testable with a scripted model, and why `DEMO_MODE=offline` needs no
 branch anywhere except `composition.ts`.
 
 Full detail — request lifecycle, sequence diagram, guardrail inventory, alerting —
-is in **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**. The reasoning behind each
-choice is in **[docs/DECISIONS.md](docs/DECISIONS.md)**. The demo script is in
-**[docs/DEMO.md](docs/DEMO.md)**.
+is in **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**.
 
 ---
 
@@ -116,13 +144,15 @@ choice is in **[docs/DECISIONS.md](docs/DECISIONS.md)**. The demo script is in
 | Tool | Input | Guarded by |
 | --- | --- | --- |
 | `web_search` | `{ query, maxResults? }` | Provider port — Tavily live, recorded fixtures offline |
-| `http_get` | `{ url }` | DNS-resolved SSRF check, re-run after every redirect; 2 redirects, 5s, 1 MB, content-type allowlist |
+| `http_get` | `{ url, offset? }` | DNS-resolved SSRF check, re-run after every redirect; 2 redirects, 5s, 1 MB, content-type allowlist. Returns 12k characters at a time with `nextOffset`, so a long page is read on rather than half-read |
 | `calculator` | `{ expression }` | An explicit tokenizer and shunting-yard evaluator. Never `eval`, never `new Function`, never `vm` |
-| `finish` | `{ answer, citations }` | Every citation URL cross-checked against what the tools returned |
+| `finish` | `{ answer, citations }` | Every citation's URL cross-checked against what the tools returned, its quote against the text they returned for it, and that text against how it was obtained |
 
 Adding a fifth is one new file plus one line in `tools/index.ts`. The Zod schema
 that validates the model's arguments is the same schema converted to JSON Schema and
-handed to the model — one definition, no drift.
+handed to the model — one definition, no drift. Each tool also declares what its
+output is worth as evidence (`fetched`, `snippet`, `none`), so the grounding check
+learns about a new source of text without anyone remembering to wire it up.
 
 ---
 
@@ -131,7 +161,7 @@ handed to the model — one definition, no drift.
 | Script | What it does |
 | --- | --- |
 | `pnpm demo` | Offline demo on :8080 — no keys, no network, serves the UI too |
-| `pnpm live` | Same, against the real Anthropic and Tavily APIs, reading `.env.local` |
+| `pnpm live` | Same, against the real Anthropic and Tavily APIs, reading `.env.local`. Restarts on edit |
 | `pnpm dev` | API on :8080 and the Vite dev server on :5173, with HMR |
 | `pnpm build` | Shared contracts, then the API, then the web bundle |
 | `pnpm test` | Every suite — passes with no network and no API key |
@@ -196,9 +226,11 @@ In the order I would actually do it.
    somewhere durable would turn the demo into an evaluation set — the same twenty
    questions, replayed against a new prompt or a new model, diffed.
 4. **A real eval harness.** Right now correctness is "six deterministic scenarios
-   pass". That proves the loop's mechanics, not the agent's judgment. Scoring answer
-   quality and citation precision across a fixed question set is what would let me
-   change the system prompt with any confidence.
+   pass". That proves the loop's mechanics, not the agent's judgment. The grounding
+   check already produces the number a harness would score — the share of citations
+   that reached `quoted` — so the missing piece is a fixed question set and somewhere
+   to put the results. That is what would let me change the system prompt with any
+   confidence.
 5. **Managed identity instead of registry credentials.** The deploy uses the ACR
    admin user because it works in one pass with only Contributor. A system-assigned
    identity with an `AcrPull` role assignment is the right answer and needs a
