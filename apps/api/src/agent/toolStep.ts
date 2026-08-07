@@ -4,7 +4,7 @@ import type { ContentBlock, ToolUseBlock } from '../llm/port.ts';
 import { redactArgs } from '../platform/redact.ts';
 import { FINISH_TOOL_NAME } from '../tools/finish.ts';
 import type { ToolInvocation } from '../tools/registry.ts';
-import { collectUrls } from './citations.ts';
+import { collectEvidence, type Evidence } from './citations.ts';
 import type { AgentPolicy } from './policy.ts';
 import type { RunRecorder } from './recorder.ts';
 import type { AgentDeps } from './types.ts';
@@ -24,7 +24,7 @@ export interface ToolStepInput {
   readonly deps: AgentDeps;
   readonly recorder: RunRecorder;
   readonly signal: AbortSignal;
-  readonly observedUrls: Set<string>;
+  readonly evidence: Evidence;
 }
 
 /**
@@ -38,7 +38,7 @@ export interface ToolStepInput {
 export async function* executeToolCalls(
   input: ToolStepInput,
 ): AsyncGenerator<AgentEvent, ToolStepResult, void> {
-  const { step, calls, policy, deps, recorder, signal, observedUrls } = input;
+  const { step, calls, policy, deps, recorder, signal, evidence } = input;
 
   // Anything beyond the per-step cap is refused rather than silently dropped:
   // every tool_use must come back with a tool_result, and the model is told why.
@@ -83,11 +83,14 @@ export async function* executeToolCalls(
     });
 
     if (outcome.status === 'ok') {
-      // Deliberately not `finish`. Its output echoes its input, so collecting from
-      // it would add the model's own claimed citations to the evidence set and the
-      // check would verify the answer against itself — passing every time, catching
-      // nothing. Only tools that actually went and got something count as evidence.
-      if (call.name !== FINISH_TOOL_NAME) collectUrls(outcome.output, observedUrls);
+      // Each tool declares what its output is worth, so this stays one lookup rather
+      // than a growing list of tool names to exclude — and so the difference between
+      // a page a tool fetched and a snippet describing it survives all the way to
+      // the citation's label. `finish` and `calculator` declare `none`: one echoes
+      // the agent's own claims back (verifying the answer against itself would pass
+      // every time and catch nothing) and the other is evidence about no URL at all.
+      const worth = deps.tools.evidenceFor(call.name);
+      if (worth !== 'none') collectEvidence(outcome.output, evidence, worth);
       yield recorder.event({
         type: 'tool.succeeded',
         step,

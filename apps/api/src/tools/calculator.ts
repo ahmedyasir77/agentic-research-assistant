@@ -39,6 +39,7 @@ export function createCalculatorTool(): Tool<
     inputSchema: InputSchema,
     outputSchema: OutputSchema,
     timeoutMs: 1_000,
+    evidence: 'none',
     execute: ({ expression }) => {
       const tokens = tokenize(expression);
       const rpn = toReversePolish(tokens);

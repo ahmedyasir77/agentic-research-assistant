@@ -18,9 +18,19 @@ export interface AgentPolicy extends RunBudgets {
   readonly maxNudges: number;
 }
 
+/**
+ * Sized for a question that needs real research rather than a lookup.
+ *
+ * The old 8 steps and 60s fitted a demo question — search, read, finish — and cut
+ * off anything larger mid-sentence. An open question costs more than that before
+ * anyone has done anything wrong: several sources read, a long answer written, and
+ * possibly a correction round after the grounding check sends the agent back for a
+ * quote. The budget has to cover the honest version of the work, or the rails stop
+ * bounding a runaway loop and start truncating ordinary runs.
+ */
 export const DEFAULT_POLICY: AgentPolicy = {
-  maxSteps: 8,
-  maxWallClockMs: 60_000,
+  maxSteps: 14,
+  maxWallClockMs: 180_000,
   maxToolCallsPerStep: 3,
   maxOutputTokens: 4_096,
   maxNudges: 1,
