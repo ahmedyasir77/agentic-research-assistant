@@ -1,6 +1,8 @@
 import { MAX_QUERY_LENGTH } from '@ara/shared';
 import { useState, type JSX, type SubmitEventHandler } from 'react';
 
+import { ICON, Spinner } from './Glyphs.tsx';
+
 /**
  * The recorded ones first, so a demo with no network still has something to show.
  * The second is recorded too, and is the run where the grounding check catches a
@@ -18,6 +20,15 @@ export interface ComposerProps {
   readonly onSubmit: (query: string) => void;
 }
 
+/**
+ * DESIGN.md §5 — a bordered input that takes the Accent border when it is active,
+ * a reverse-video submit, and the examples as a menu rather than a row of pills.
+ *
+ * The `▸` on the prompt and on the hovered menu item are drawn in CSS, not in the
+ * markup. That is not a stylistic preference: a glyph in the markup would end up
+ * inside the button's accessible name, so the submit would announce as "▸ Ask"
+ * and an example would announce with a selector character it does not have.
+ */
 export function Composer({ busy, onSubmit }: ComposerProps): JSX.Element {
   const [query, setQuery] = useState('');
 
@@ -30,49 +41,62 @@ export function Composer({ busy, onSubmit }: ComposerProps): JSX.Element {
   return (
     <form className="composer" onSubmit={submit}>
       <div className="composer__row">
-        <label className="composer__input-wrap" htmlFor="query" hidden>
+        <label className="sr-only" htmlFor="query">
           Your research question
         </label>
-        <input
-          id="query"
-          className="composer__input"
-          value={query}
-          onChange={(event) => {
-            setQuery(event.target.value);
-          }}
-          placeholder="Ask a research question"
-          maxLength={MAX_QUERY_LENGTH}
-          disabled={busy}
-          autoComplete="off"
-        />
-        <button
-          className="composer__submit"
-          type="submit"
-          disabled={busy || query.trim().length < 3}
-        >
+
+        <div className={`field${busy ? ' field--busy' : ''}`}>
+          <span className="field__prompt" aria-hidden="true">
+            {ICON.selected}
+          </span>
+          <input
+            id="query"
+            className="field__input"
+            value={query}
+            onChange={(event) => {
+              setQuery(event.target.value);
+            }}
+            placeholder="Ask a research question"
+            maxLength={MAX_QUERY_LENGTH}
+            disabled={busy}
+            autoComplete="off"
+          />
+          {/* Only once there is something to count — "0/500" at rest is noise. */}
+          {query.length > 0 && (
+            <span className="field__count" aria-hidden="true">
+              {query.length}/{MAX_QUERY_LENGTH}
+            </span>
+          )}
+        </div>
+
+        <button className="button" type="submit" disabled={busy || query.trim().length < 3}>
+          {busy && <Spinner />}
           {busy ? 'Working' : 'Ask'}
         </button>
       </div>
 
-      <div className="chips">
-        <span className="chips__label" id="examples-label">
+      <div className="examples">
+        <span className="label" id="examples-label">
           Try
         </span>
-        {EXAMPLES.map((example) => (
-          <button
-            key={example}
-            className="chip"
-            type="button"
-            disabled={busy}
-            aria-describedby="examples-label"
-            onClick={() => {
-              setQuery(example);
-              onSubmit(example);
-            }}
-          >
-            {example}
-          </button>
-        ))}
+        <ul className="menu">
+          {EXAMPLES.map((example) => (
+            <li key={example}>
+              <button
+                className="menu__item"
+                type="button"
+                disabled={busy}
+                aria-describedby="examples-label"
+                onClick={() => {
+                  setQuery(example);
+                  onSubmit(example);
+                }}
+              >
+                {example}
+              </button>
+            </li>
+          ))}
+        </ul>
       </div>
     </form>
   );

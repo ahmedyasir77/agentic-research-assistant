@@ -1,3 +1,5 @@
+import type { AgentEvent, RunFailureReason, RunTrace } from '@ara/shared';
+
 import { assistantText, toolUses, type LlmMessage, type LlmResponse } from '../llm/port.ts';
 import { withRetry } from '../platform/retry.ts';
 import { FinishPayloadSchema } from '../tools/finish.ts';
@@ -48,6 +50,11 @@ export async function* runAgent(query: string, deps: AgentDeps): AgentRun {
   const system = buildSystemPrompt(policy);
   let lastText = '';
   let nudges = 0;
+  // A complete `finish` the loop chose not to ship yet, because it wanted the agent
+  // to go back and improve the evidence under a citation. Held rather than dropped:
+  // the correction is an improvement on an answer that already passed, so if the
+  // turn that was meant to deliver it never lands, this is what the run returns.
+  let held: ToolInvocation | undefined;
 
   try {
     yield recorder.event({ type: 'run.started', query, budgets, modelId: llm.modelId });
@@ -55,8 +62,10 @@ export async function* runAgent(query: string, deps: AgentDeps): AgentRun {
     for (let step = 0; ; step += 1) {
       const verdict = checkBudget(policy, { step, elapsedMs: recorder.elapsedMs });
       if (!verdict.withinBudget) {
-        return yield* fail(
+        return yield* settle(
           recorder,
+          evidence,
+          held,
           verdict.reason ?? 'budget_exceeded',
           verdict.message,
           lastText,
@@ -86,15 +95,20 @@ export async function* runAgent(query: string, deps: AgentDeps): AgentRun {
         // happened, because an aborted SDK call throws its own generic error.
         if (deadline.signal.aborted) {
           logger.warn({ runId: deps.runId, step }, 'model call cut off by wall-clock budget');
-          return yield* fail(
+          return yield* settle(
             recorder,
+            evidence,
+            held,
             'budget_exceeded',
             `Stopped mid-answer: the run hit its ${String(Math.round(policy.maxWallClockMs / 1000))}s time limit while the model was still writing.`,
             lastText,
           );
         }
+        // Logged as an error even when there is a held answer to fall back on: the
+        // provider did fail, and the run reporting "completed" is the one place that
+        // failure would otherwise leave no trace at all.
         logger.error({ runId: deps.runId, step, err: error }, 'model call failed');
-        return yield* fail(recorder, 'llm_error', describeError(error), lastText);
+        return yield* settle(recorder, evidence, held, 'llm_error', describeError(error), lastText);
       }
       recorder.addUsage(response.usage);
 
@@ -124,13 +138,20 @@ export async function* runAgent(query: string, deps: AgentDeps): AgentRun {
         // in prose and then does as it is told has cost a step, which the trace
         // now shows — it has not made the answer any less trustworthy, and that is
         // what a warning is for.
-        recorder.addWarning({
-          kind: 'missing_finish_call',
-          message:
-            'The model gave its answer as prose instead of calling finish, so its citations were never checked.',
-        });
-        return yield* fail(
+        //
+        // Not raised when there is a held answer: that answer's citations *were*
+        // checked, and the warning would say the opposite of what happened.
+        if (held === undefined) {
+          recorder.addWarning({
+            kind: 'missing_finish_call',
+            message:
+              'The model gave its answer as prose instead of calling finish, so its citations were never checked.',
+          });
+        }
+        return yield* settle(
           recorder,
+          evidence,
+          held,
           'no_tool_call',
           'The model would not use the finish tool, so the run was stopped rather than looped.',
           lastText,
@@ -172,7 +193,12 @@ export async function* runAgent(query: string, deps: AgentDeps): AgentRun {
         // it. Sending it back costs a step and is capped, so the worst case is one
         // wasted step and the same answer — which the labels would have described
         // anyway.
+        //
+        // That "worst case" is only true because the answer is kept. Without the
+        // hand-off to `held`, a correction turn that failed took a finished run
+        // down with it.
         if (correction !== undefined) {
+          held = executed.finished;
           nudges += 1;
           continue;
         }
@@ -186,6 +212,45 @@ export async function* runAgent(query: string, deps: AgentDeps): AgentRun {
 
 function describeError(error: unknown): string {
   return error instanceof Error ? error.message : 'The model call failed.';
+}
+
+/**
+ * How a run ends once it has run out of ways to continue — with the best complete
+ * answer it has, if it has one.
+ *
+ * `held` is a `finish` that passed everything except the loop's own opinion that
+ * the agent could do better, so it was sent back for one more turn. That opinion is
+ * worth a step; it is not worth the run. If the turn meant to deliver the
+ * improvement never lands, shipping the held answer returns a complete, checked
+ * result where failing would have returned nothing — and the citation labels on it
+ * say exactly what the correction was going to be about anyway.
+ *
+ * The fallback is announced rather than silent. A run that reports "completed"
+ * after the provider fell over is a run whose failure left no mark on the thing
+ * anybody reads, and the whole point of the citation labels is that the interesting
+ * failures are the ones you can see.
+ */
+function* settle(
+  recorder: RunRecorder,
+  evidence: Evidence,
+  held: ToolInvocation | undefined,
+  reason: RunFailureReason,
+  message: string | undefined,
+  partialAnswer: string,
+): Generator<AgentEvent, RunTrace, void> {
+  if (held === undefined) return yield* fail(recorder, reason, message, partialAnswer);
+
+  // The cause goes last rather than mid-sentence: it is a whole sentence of its
+  // own, punctuation included, and splicing it into one produced "…provides.. This".
+  recorder.addWarning({
+    kind: 'uncorrected_citation',
+    message:
+      'The agent was asked to go back and strengthen the evidence under a citation, and that ' +
+      'turn did not finish, so this is the answer it had from before the correction — the ' +
+      `labels on the sources are the check on it. The turn stopped because: ${message ?? 'the run stopped.'}`,
+  });
+
+  return yield* complete(recorder, held, evidence);
 }
 
 /**

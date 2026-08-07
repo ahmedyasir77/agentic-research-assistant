@@ -15,8 +15,13 @@ import {
  * Bumped whenever an event's shape changes in a way an older browser tab could not
  * read. The client checks it and asks the user to reload rather than rendering
  * half-understood events.
+ *
+ * 3 — `RunWarning.kind` gained `uncorrected_citation`. A new member of a closed
+ * enum is exactly this kind of change: the field is not new, but a tab built
+ * against version 2 rejects the whole `run.completed` event rather than the one
+ * warning it does not recognise, which is a blank page instead of an answer.
  */
-export const EVENT_SCHEMA_VERSION = 2;
+export const EVENT_SCHEMA_VERSION = 3;
 
 /**
  * `seq` is monotonic per run: a client that drops its connection and re-attaches

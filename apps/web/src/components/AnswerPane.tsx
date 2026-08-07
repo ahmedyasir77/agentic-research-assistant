@@ -1,10 +1,20 @@
 import type { CitationGrounding, RunWarning, VerifiedCitation } from '@ara/shared';
 import { Fragment, type JSX, type ReactNode } from 'react';
 
+import { ICON } from './Glyphs.tsx';
+
 export interface AnswerPaneProps {
   readonly answer: string;
   readonly citations: readonly VerifiedCitation[];
   readonly warnings: readonly RunWarning[];
+}
+
+interface GroundingStyle {
+  readonly label: string;
+  readonly detail: string;
+  /** DESIGN.md §7. Colour carries severity; the glyph carries which check failed. */
+  readonly icon: string;
+  readonly tone: 'ok' | 'quiet' | 'bad';
 }
 
 /**
@@ -14,11 +24,17 @@ export interface AnswerPaneProps {
  * reader gets on hover, and it says what was checked rather than how confident
  * anyone is. `quoted` is labelled too — a badge that appears only on failure
  * teaches people that no badge means unchecked, which is the opposite of true.
+ *
+ * The two failures share a tone and differ in mark, because they are different
+ * failures: `!` is a claim that did not hold against a source that is real, `✗`
+ * is a source that never appeared in the run at all.
  */
-const GROUNDING: Record<CitationGrounding, { readonly label: string; readonly detail: string }> = {
+const GROUNDING: Record<CitationGrounding, GroundingStyle> = {
   quoted: {
     label: 'Quoted',
     detail: 'This page was fetched, and the quoted sentence appears in the text it served.',
+    icon: ICON.success,
+    tone: 'ok',
   },
   snippet: {
     label: 'Snippet only',
@@ -26,22 +42,30 @@ const GROUNDING: Record<CitationGrounding, { readonly label: string; readonly de
       'The quoted sentence appears in a search result for this URL, but the page itself was ' +
       'never fetched — the words are the search engine describing the source rather than the ' +
       'source.',
+    icon: ICON.info,
+    tone: 'quiet',
   },
   unsupported: {
     label: 'Quote not found',
     detail:
       'A tool returned this URL, but the quoted sentence does not appear in what it returned. ' +
       'The source is real; the words attributed to it are not.',
+    icon: ICON.warning,
+    tone: 'bad',
   },
   url_only: {
     label: 'Source only',
     detail:
       'A tool returned this URL, but no quote was offered — the source was checked and the ' +
       'claim was not.',
+    icon: ICON.pending,
+    tone: 'quiet',
   },
   unobserved: {
     label: 'Unverified',
     detail: 'No tool returned this URL during the run.',
+    icon: ICON.error,
+    tone: 'bad',
   },
 };
 
@@ -50,7 +74,7 @@ export function AnswerPane({ answer, citations, warnings }: AnswerPaneProps): JS
 
   return (
     <div className="panel">
-      <h2 className="panel__title">Answer</h2>
+      <h2 className="panel__legend">Answer</h2>
 
       {/* Paragraphs have no identity beyond their position, so position is the key. */}
       {answer.split(/\n{2,}/u).map((paragraph, index) => (
@@ -60,11 +84,14 @@ export function AnswerPane({ answer, citations, warnings }: AnswerPaneProps): JS
       ))}
 
       {citations.length > 0 && (
-        <ul className="sources" aria-label="Sources">
-          {citations.map((citation) => (
-            <Source citation={citation} key={citation.id} />
-          ))}
-        </ul>
+        <>
+          <h3 className="panel__heading">Sources</h3>
+          <ul className="sources" aria-label="Sources">
+            {citations.map((citation) => (
+              <Source citation={citation} key={citation.id} />
+            ))}
+          </ul>
+        </>
       )}
 
       {warnings.length > 0 && <Warnings warnings={warnings} />}
@@ -73,11 +100,14 @@ export function AnswerPane({ answer, citations, warnings }: AnswerPaneProps): JS
 }
 
 function Source({ citation }: { readonly citation: VerifiedCitation }): JSX.Element {
-  const { label, detail } = GROUNDING[citation.grounding];
+  const { label, detail, icon, tone } = GROUNDING[citation.grounding];
 
   return (
-    <li className={`source source--${citation.grounding}`}>
+    <li className={`source source--${citation.grounding} source--${tone}`}>
       <div className="source__head">
+        <span className="source__mark" aria-hidden="true">
+          {icon}
+        </span>
         <span className="source__id">[{citation.id}]</span>
         <a className="source__link" href={citation.url} target="_blank" rel="noreferrer noopener">
           {citation.title}
@@ -132,7 +162,12 @@ function Grounding({ citation }: { readonly citation: VerifiedCitation }): JSX.E
 export function Warnings({ warnings }: { readonly warnings: readonly RunWarning[] }): JSX.Element {
   return (
     <div className="warnings">
-      <strong>The run flagged {warnings.length === 1 ? 'an issue' : 'some issues'}</strong>
+      <strong className="warnings__title">
+        <span className="warnings__mark" aria-hidden="true">
+          {ICON.warning}
+        </span>
+        The run flagged {warnings.length === 1 ? 'an issue' : 'some issues'}
+      </strong>
       <ul className="warnings__list">
         {warnings.map((warning) => (
           <li key={`${warning.kind}:${warning.message}`}>{warning.message}</li>

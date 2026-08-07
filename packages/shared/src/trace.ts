@@ -139,6 +139,8 @@ export const RunWarningSchema = z.object({
     'unsupported_quote',
     'invalid_tool_arguments',
     'missing_finish_call',
+    /** A finish was shipped without the correction the loop went back to ask for. */
+    'uncorrected_citation',
   ]),
   message: z.string(),
 });

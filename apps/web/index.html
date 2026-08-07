@@ -3,7 +3,17 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="theme-color" content="#0a0a0a" />
     <title>Agentic Research Assistant</title>
+    <!-- The background is set here as well as in tokens.css so the first paint is
+         already dark: the stylesheet arrives as a module, and a white flash before
+         it lands is the one thing a terminal UI cannot survive. -->
+    <style>
+      html {
+        background: #0a0a0a;
+      }
+    </style>
   </head>
   <body>
     <div id="root"></div>

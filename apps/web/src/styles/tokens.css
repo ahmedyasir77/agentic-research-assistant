@@ -1,28 +1,71 @@
 /**
- * The token system from docs/DECISIONS.md, ADR-024 — "the trace".
+ * The "Minimal" TUI design system from DESIGN.md, rendered in a browser.
  *
- * Six values, both typefaces already on the machine. No webfont is loaded on
- * purpose: the one promise DEMO_MODE=offline makes is that it issues no network
- * request, and a font link would break it silently, on stage.
+ * DESIGN.md is vendored from `cola-runner/awesome-tui-design` and pinned in
+ * design-lock.json; the semantic roles and the neutral scale below are its §2
+ * table copied verbatim, so a re-fetch diffs against something.
+ *
+ * Still no webfont, for the reason ADR-024 gave: the one promise
+ * DEMO_MODE=offline makes is that it issues no network request, and a font link
+ * would break it silently, on stage. A terminal design system wants the terminal
+ * face anyway — the sans-serif exception for prose is gone, and every character
+ * on the page is now monospaced.
  */
 :root {
-  --ink: #16202b;
-  --muted: #5d6e7e;
-  --paper: #e8ecf0;
-  --card: #fcfdfe;
-  --signal: #0b69c7;
-  --flag: #b0362a;
+  color-scheme: dark;
+
+  /* §2 Semantic roles. */
+  --bg: #0a0a0a;
+  --fg: #ededed;
+  --primary: #ffffff;
+  --secondary: #888888;
+  --accent: #0070f3;
+  --success: #00c853;
+  --warning: #f5a623;
+  --error: #ee0000;
+  --muted: #555555;
+  --surface: #1a1a1a;
+
+  /* §2 Neutral scale, used for text hierarchy so body text is never coloured. */
+  --n-50: #1a1a1a;
+  --n-100: #2a2a2a;
+  --n-200: #444444;
+  --n-300: #666666;
+  --n-400: #888888;
+  --n-500: #ededed;
 
   /* Derived, so a token change propagates rather than being pasted around. */
-  --rule: color-mix(in srgb, var(--muted) 28%, transparent);
-  --signal-wash: color-mix(in srgb, var(--signal) 8%, transparent);
-  --flag-wash: color-mix(in srgb, var(--flag) 8%, transparent);
-  --muted-wash: color-mix(in srgb, var(--muted) 10%, transparent);
+  --rule: var(--n-100);
+  --rule-lit: var(--n-200);
+  --accent-wash: color-mix(in srgb, var(--accent) 16%, transparent);
+  --error-wash: color-mix(in srgb, var(--error) 12%, transparent);
+  --warning-wash: color-mix(in srgb, var(--warning) 10%, transparent);
+  --muted-wash: color-mix(in srgb, var(--secondary) 12%, transparent);
 
-  --instrument: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace;
-  --voice: ui-sans-serif, system-ui, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  /* Two derivations that are not in the table, and are here on purpose.
+     `--accent` and `--error` were specified against a terminal, where they mostly
+     land on single glyphs. As running text on #0a0a0a they measure 4.3:1 and
+     4.4:1 — both under WCAG AA. Lifting each toward Primary buys 6.1:1 and 5.4:1
+     without moving the hue, so a citation link and an error line stay readable.
+     The pure tokens are kept for marks, rules and fills, where contrast is not a
+     legibility question. */
+  --accent-text: color-mix(in srgb, var(--accent) 78%, var(--primary));
+  --error-text: color-mix(in srgb, var(--error) 72%, var(--primary));
 
-  --step: 0.5rem;
-  --radius: 3px;
-  --trace-width: 2px;
+  /* §3 One face. `--cell` is the character cell the whole layout is measured in:
+     `ch` for anything horizontal, `--line` for anything vertical. */
+  --mono: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, 'DejaVu Sans Mono', monospace;
+  --cell: 15px;
+  --line: 1.55;
+
+  /* §6 Layout. 80 columns is the floor the design tests at, 120 the ideal; the
+     text column stops at 104 so a wrapped sentence stays inside the eye's span. */
+  --cols: 104ch;
+  --indent: 2ch;
+  --gutter: 3ch;
+
+  /* One blank terminal line, the design's only unit of vertical space. */
+  --row: calc(var(--cell) * var(--line));
+
+  --radius: 0;
 }

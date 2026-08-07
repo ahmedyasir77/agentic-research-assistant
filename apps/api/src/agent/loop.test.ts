@@ -512,6 +512,82 @@ describe('scenario 6 — citations that do not hold up', () => {
     expect(warning?.message).toContain('5.9 times more than red');
   });
 
+  // The correction is an improvement on an answer that already passed, so it is
+  // worth a step and not worth the run. Each of these ends the correction turn a
+  // different way; all three have to arrive at the same place.
+  describe('when the correction turn never lands', () => {
+    it('ships the held answer instead of losing the run to a provider failure', async () => {
+      // Exactly the recorded grounding demo: four scripted turns ending in finish,
+      // a misquote that sends the agent back, and no fifth turn to go back to.
+      let calls = 0;
+      const scripted = createFakeLlmClient([read, misquoteFinish]);
+      const llm = {
+        modelId: 'fake-model',
+        complete: (request: Parameters<FakeLlmClient['complete']>[0]) => {
+          calls += 1;
+          return calls > 2
+            ? Promise.reject(new LlmError('Fake LLM script exhausted after 2 turns.'))
+            : scripted.complete(request);
+        },
+      };
+
+      const { trace } = await run('why is the sky blue', { ...deps([]), llm });
+
+      expect(trace.status).toBe('succeeded');
+      expect(trace.answer).toBe('The ratio is 5.9. [1]');
+      // The verdict the demo exists to show survives the fallback.
+      expect(trace.citations[0]?.grounding).toBe('unsupported');
+      expect(trace.warnings.map((entry) => entry.kind)).toStrictEqual([
+        'uncorrected_citation',
+        'unsupported_quote',
+      ]);
+      expect(trace.warnings[0]?.message).toContain('script exhausted');
+    });
+
+    it('ships the held answer when the correction turn runs out of steps', async () => {
+      const agentDeps = deps([read, misquoteFinish], { policy: { maxSteps: 3 } });
+
+      const { trace } = await run('why is the sky blue', agentDeps);
+
+      expect(trace.status).toBe('succeeded');
+      expect(trace.outcome).toBe('completed');
+      expect(trace.citations[0]?.grounding).toBe('unsupported');
+      expect(trace.warnings.map((entry) => entry.kind)).toContain('uncorrected_citation');
+    });
+
+    it('does not claim the citations went unchecked when the model answers in prose', async () => {
+      // The prose path raises `missing_finish_call`, whose message says the
+      // citations were never checked. With an answer in hand that is false: they
+      // were checked, and the labels are on them.
+      const agentDeps = deps([read, misquoteFinish, turn.text('The ratio is about 5.9.')], {
+        policy: { maxNudges: 1 },
+      });
+
+      const { trace } = await run('why is the sky blue', agentDeps);
+
+      expect(trace.status).toBe('succeeded');
+      expect(trace.citations[0]?.grounding).toBe('unsupported');
+      const kinds = trace.warnings.map((entry) => entry.kind);
+      expect(kinds).toContain('uncorrected_citation');
+      expect(kinds).not.toContain('missing_finish_call');
+    });
+
+    it('prefers the corrected answer when the agent does come back with one', async () => {
+      // The fallback must not shadow the path it is a fallback for.
+      const agentDeps = deps([
+        read,
+        misquoteFinish,
+        finishCall('The ratio is 5.5. [1]', [{ url: SOURCE, quote: PAGE_SENTENCE }]),
+      ]);
+
+      const { trace } = await run('why is the sky blue', agentDeps);
+
+      expect(trace.answer).toBe('The ratio is 5.5. [1]');
+      expect(trace.citations[0]?.grounding).toBe('quoted');
+      expect(trace.warnings).toStrictEqual([]);
+    });
+  });
+
   it('grounds a quote against a url a tool returned in any shape, not just search results', async () => {
     const agentDeps = deps([
       turn.toolCall([{ id: 'c1', name: 'http_get', input: { url: SOURCE } }]),

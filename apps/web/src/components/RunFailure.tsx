@@ -34,13 +34,13 @@ export interface RunFailureProps {
 export function RunFailure({ failure, warnings }: RunFailureProps): JSX.Element {
   return (
     <div className="panel panel--failed">
-      <h2 className="panel__title">{HEADINGS[failure.reason]}</h2>
+      <h2 className="panel__legend">{HEADINGS[failure.reason]}</h2>
       <p className="prose">{failure.message}</p>
-      <p className="prose">{NEXT_STEPS[failure.reason]}</p>
+      <p className="prose prose--quiet">{NEXT_STEPS[failure.reason]}</p>
 
       {failure.partialAnswer !== undefined && (
         <>
-          <h3 className="panel__title">What it had so far</h3>
+          <h3 className="panel__heading">What it had so far</h3>
           <p className="prose">{failure.partialAnswer}</p>
         </>
       )}

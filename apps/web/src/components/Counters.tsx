@@ -1,6 +1,7 @@
 import { useEffect, useState, type JSX } from 'react';
 
 import { isRunning, type RunState } from '../lib/runReducer.ts';
+import { Meter } from './Glyphs.tsx';
 
 export interface CountersProps {
   readonly state: RunState;
@@ -10,6 +11,12 @@ export interface CountersProps {
  * What the run is spending. Elapsed time and steps update live; tokens and cost
  * arrive with the event that ends the run, because that is when the server knows
  * them — showing a guess in the meantime would be worse than showing a dash.
+ *
+ * Laid out as DESIGN.md §5 lays out a table: no outer border, headers separated
+ * from values by a single rule, nothing boxed. The step budget gets the §8
+ * progress bar underneath, which is the one number here with a known ceiling —
+ * elapsed time has one too, but a bar that fills as a deadline approaches reads
+ * as a countdown, and the run is not on a countdown.
  */
 export function Counters({ state }: CountersProps): JSX.Element {
   const elapsedMs = useElapsed(state);
@@ -17,36 +24,44 @@ export function Counters({ state }: CountersProps): JSX.Element {
   const maxSteps = state.budgets?.maxSteps;
   const overTime =
     state.budgets !== undefined && elapsedMs >= state.budgets.maxWallClockMs && isRunning(state);
+  const overSteps = maxSteps !== undefined && steps >= maxSteps;
 
   return (
-    <dl className="counters">
-      <div>
-        <dt className="counter__label">Elapsed</dt>
-        <dd className={`counter__value${overTime ? ' counter__value--over' : ''}`}>
-          {(elapsedMs / 1000).toFixed(1)}s
-        </dd>
-      </div>
-      <div>
-        <dt className="counter__label">Steps</dt>
-        <dd
-          className={`counter__value${maxSteps !== undefined && steps >= maxSteps ? ' counter__value--over' : ''}`}
-        >
-          {steps} / {maxSteps ?? '—'}
-        </dd>
-      </div>
-      <div>
-        <dt className="counter__label">Tokens</dt>
-        <dd className="counter__value">
-          {state.usage.inputTokens + state.usage.outputTokens === 0
-            ? '—'
-            : `${formatCount(state.usage.inputTokens)} in · ${formatCount(state.usage.outputTokens)} out`}
-        </dd>
-      </div>
-      <div>
-        <dt className="counter__label">Est. cost</dt>
-        <dd className="counter__value">{formatCost(state)}</dd>
-      </div>
-    </dl>
+    <section className="counters" aria-label="Run budget">
+      <dl className="table">
+        <div className="table__col">
+          <dt className="table__head">Elapsed</dt>
+          <dd className={`table__cell${overTime ? ' table__cell--over' : ''}`}>
+            {(elapsedMs / 1000).toFixed(1)}s
+          </dd>
+        </div>
+        <div className="table__col">
+          <dt className="table__head">Steps</dt>
+          <dd className={`table__cell${overSteps ? ' table__cell--over' : ''}`}>
+            {steps} / {maxSteps ?? '—'}
+          </dd>
+        </div>
+        <div className="table__col">
+          <dt className="table__head">Tokens</dt>
+          <dd className="table__cell">
+            {state.usage.inputTokens + state.usage.outputTokens === 0
+              ? '—'
+              : `${formatCount(state.usage.inputTokens)} in · ${formatCount(state.usage.outputTokens)} out`}
+          </dd>
+        </div>
+        <div className="table__col">
+          <dt className="table__head">Est. cost</dt>
+          <dd className="table__cell">{formatCost(state)}</dd>
+        </div>
+      </dl>
+
+      {maxSteps !== undefined && (
+        <p className={`budget${overSteps ? ' budget--over' : ''}`}>
+          <Meter value={steps} max={maxSteps} label="Steps used against the budget" />
+          <span className="budget__note">step budget</span>
+        </p>
+      )}
+    </section>
   );
 }
 
