@@ -198,13 +198,29 @@ compiles with `tsc` for production.
 
 ## Deploying
 
+One container, two hosts, one Dockerfile. Express serves the API and the built React
+bundle from the same process, so the browser only ever calls relative `/api` paths.
+
+Both paths default to `DEMO_MODE=offline`, which replays recorded turns from
+`fixtures/` with no network calls and no API key needed.
+
+### Render
+
+The free option, and the one the public demo runs on. `render.yaml` is a blueprint:
+point Render at this repository once and it builds `infra/Dockerfile` on every commit
+that passes CI, serving the result at `https://<name>.onrender.com`.
+
+### Azure Container Apps
+
 ```bash
 ./infra/deploy.sh                                    # offline demo, no keys needed
 DEMO_MODE=live SEARCH_PROVIDER=tavily ./infra/deploy.sh   # after sourcing .env.local
 ```
 
-One container on Azure Container Apps: Express serves the API and the built React
-bundle from the same process. The script creates the resource group and registry if
-they are missing, builds the image server-side with `az acr build` (no local Docker
-required), deploys the bicep template, and prints the URL. API keys become Container
-App **secrets** referenced by `secretRef`: never plain environment values.
+The script creates the resource group and registry if they are missing, builds the
+image server-side with `az acr build` (no local Docker required), deploys the bicep
+template, and prints the URL. API keys become Container App **secrets** referenced by
+`secretRef`: never plain environment values.
+
+A run lives in one replica's memory and the browser subscribes to it in a second
+request, so ingress is configured with session affinity and `maxReplicas: 2`. 
