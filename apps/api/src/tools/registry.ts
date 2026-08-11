@@ -27,6 +27,7 @@ export interface ToolRegistryOptions {
 export class ToolRegistry {
   readonly #tools: ReadonlyMap<string, Tool>;
   readonly #now: () => number;
+  #modelSpecs: ToolSpec[] | undefined;
 
   constructor(tools: readonly Tool[], options: ToolRegistryOptions = {}) {
     const byName = new Map<string, Tool>();
@@ -63,14 +64,19 @@ export class ToolRegistry {
    * The tool list as the model receives it. The JSON Schema is generated from the
    * same Zod schema `invoke` validates against, so what the model is told and what
    * it is held to are the same object.
+   *
+   * Cached on first call: the tool set is fixed for the life of the registry, so
+   * every step of every run would otherwise re-walk the same Zod schemas to
+   * produce the same JSON Schema.
    */
   toModelSpecs(): ToolSpec[] {
-    return [...this.#tools.values()].map((tool) => ({
+    this.#modelSpecs ??= [...this.#tools.values()].map((tool) => ({
       name: tool.name,
       description: tool.description,
       inputSchema: JsonValueSchema.parse(z.toJSONSchema(tool.inputSchema, { io: 'input' })),
       timeoutMs: tool.timeoutMs,
     }));
+    return this.#modelSpecs;
   }
 
   async invoke(name: string, rawArgs: unknown, ctx: ToolContext): Promise<ToolInvocation> {
