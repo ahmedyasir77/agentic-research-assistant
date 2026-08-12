@@ -177,6 +177,57 @@ describe('http_get', () => {
     expect(output.truncated).toBe(false);
   });
 
+  it('serves a continuing read from cache instead of refetching the page', async () => {
+    let calls = 0;
+    const page = `${'x'.repeat(13_000)}The endowment is larger than the GDP of some countries.`;
+    const http: HttpClient = {
+      get: () => {
+        calls += 1;
+        return Promise.resolve({
+          status: 200,
+          headers: { 'content-type': 'text/plain' },
+          body: Readable.from([page]),
+        });
+      },
+    };
+    const resolveDns: DnsResolver = () => Promise.resolve([{ address: '93.184.216.34', family: 4 }]);
+    const tool = createHttpGetTool({ http, resolveDns });
+
+    const first = await tool.execute({ url: 'https://example.com/long' }, ctx);
+    expect(calls).toBe(1);
+
+    const second = await tool.execute(
+      { url: 'https://example.com/long', offset: first.nextOffset },
+      ctx,
+    );
+    expect(calls).toBe(1);
+    expect(second.textExcerpt).toContain('The endowment is larger than');
+  });
+
+  it('refetches once the cache entry has expired', async () => {
+    let calls = 0;
+    const http: HttpClient = {
+      get: () => {
+        calls += 1;
+        return Promise.resolve({
+          status: 200,
+          headers: { 'content-type': 'text/plain' },
+          body: Readable.from(['fresh each time']),
+        });
+      },
+    };
+    const resolveDns: DnsResolver = () => Promise.resolve([{ address: '93.184.216.34', family: 4 }]);
+    let clock = 0;
+    const tool = createHttpGetTool({ http, resolveDns }, { now: () => clock });
+
+    await tool.execute({ url: 'https://example.com/a' }, ctx);
+    expect(calls).toBe(1);
+
+    clock += 5 * 60_000 + 1;
+    await tool.execute({ url: 'https://example.com/a' }, ctx);
+    expect(calls).toBe(2);
+  });
+
   it('rejects a negative offset before any request is made', () => {
     const tool = createHttpGetTool(deps(''));
     expect(tool.inputSchema.safeParse({ url: 'https://example.com', offset: -1 }).success).toBe(

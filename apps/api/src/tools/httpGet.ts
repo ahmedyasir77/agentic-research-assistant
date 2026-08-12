@@ -44,6 +44,36 @@ const MAX_EXCERPT_CHARS = 12_000;
  */
 const OVERLAP_CHARS = MAX_QUOTE_CHARS;
 
+/**
+ * How long a fetched page's extracted text is kept, keyed by the URL the model
+ * asked for.
+ *
+ * A long page is read in several `offset` calls (see `OVERLAP_CHARS`), and without
+ * this every one of them re-fetched the page and re-ran `extractText` over the
+ * whole body just to slice out a different 12,000-character window — for a page
+ * near the 1 MB transfer cap, that is the full fetch and the full regex pass again,
+ * three or four times over, for text already sitting in memory. ADR-008 leaves
+ * `http_get` unretried specifically so one agent run does not turn into several
+ * requests against a stranger's server; re-fetching the same URL for pagination was
+ * the same cost by another name. Five minutes comfortably covers one run at the
+ * default wall-clock budget (`DEFAULT_POLICY.maxWallClockMs`) plus a second run
+ * that happens to want the same page shortly after, without keeping pages around
+ * long enough to plausibly answer from stale content.
+ */
+const CACHE_TTL_MS = 5 * 60_000;
+
+/** Bounds memory: entries hold a whole page's extracted text, not a 12k excerpt. */
+const CACHE_MAX_ENTRIES = 50;
+
+interface CachedPage {
+  readonly status: number;
+  readonly contentType: string;
+  readonly text: string;
+  readonly finalUrl: string;
+  readonly truncated: boolean;
+  readonly expiresAtMs: number;
+}
+
 const InputSchema = z.object({
   url: z.url().max(2_048).describe('An absolute http(s) URL, normally one web_search returned.'),
   offset: z
@@ -78,9 +108,21 @@ const OutputSchema = z.object({
   finalUrl: z.url(),
 });
 
+export interface HttpGetToolOptions {
+  /** Injected so cache expiry is deterministic in tests. */
+  readonly now?: () => number;
+}
+
 export function createHttpGetTool(
   deps: GuardedGetDeps,
+  options: HttpGetToolOptions = {},
 ): Tool<z.infer<typeof InputSchema>, z.infer<typeof OutputSchema>> {
+  const now = options.now ?? (() => Date.now());
+  // One cache per tool instance, which — like the tool registry itself — is a
+  // process-wide singleton, so pages read early in a run stay cached for the rest
+  // of it, and concurrent runs reading the same URL share the fetch.
+  const cache = new Map<string, CachedPage>();
+
   return {
     name: 'http_get',
     description:
@@ -96,8 +138,8 @@ export function createHttpGetTool(
     evidence: 'fetched',
     execute: async ({ url, offset }, ctx) => {
       try {
-        const response = await guardedGet(url, deps, ctx.signal);
-        const text = extractText(response.body, response.contentType);
+        const page = await readPage(url, deps, ctx.signal, cache, now);
+        const text = page.text;
 
         // Clamped rather than rejected: an offset past the end is the model having
         // misjudged how long the page was, and an empty excerpt with the totals
@@ -108,25 +150,69 @@ export function createHttpGetTool(
         const more = end < text.length;
 
         return {
-          status: response.status,
-          contentType: response.contentType,
+          status: page.status,
+          contentType: page.contentType,
           textExcerpt: excerpt,
           // The body may also have been cut at the transfer limit, in which case
           // there is more page than there is text, and `nextOffset` cannot reach it.
-          truncated: response.truncated || more,
+          truncated: page.truncated || more,
           offset: start,
           totalChars: text.length,
           // Never back past `start`: on a page shorter than the overlap that would
           // hand back an offset before this read began, and the model would loop
           // over the same excerpt instead of finishing.
           ...(more ? { nextOffset: Math.max(start, end - OVERLAP_CHARS) } : {}),
-          finalUrl: response.finalUrl,
+          finalUrl: page.finalUrl,
         };
       } catch (error) {
         throw explain(error, url);
       }
     },
   };
+}
+
+/**
+ * The fetch and the extraction, done once per URL per `CACHE_TTL_MS` rather than
+ * once per call.
+ *
+ * Keyed on the URL the model asked for, not the final URL after redirects — that
+ * is the value a continuing read repeats, and it is what `assertSafeUrl` inside
+ * `guardedGet` re-validates from scratch on a cache miss. Only a successful text
+ * fetch is ever cached: `guardedGet` throws before returning for a blocked
+ * address, a non-2xx status, or an unreadable content type, and none of those
+ * reach the line that writes to the cache, so a failure is retried on the next
+ * call exactly as it was before caching existed.
+ */
+async function readPage(
+  url: string,
+  deps: GuardedGetDeps,
+  signal: AbortSignal | undefined,
+  cache: Map<string, CachedPage>,
+  now: () => number,
+): Promise<CachedPage> {
+  const cached = cache.get(url);
+  if (cached !== undefined && cached.expiresAtMs > now()) return cached;
+
+  const response = await guardedGet(url, deps, signal);
+  const page: CachedPage = {
+    status: response.status,
+    contentType: response.contentType,
+    text: extractText(response.body, response.contentType),
+    finalUrl: response.finalUrl,
+    truncated: response.truncated,
+    expiresAtMs: now() + CACHE_TTL_MS,
+  };
+
+  // Insertion order gives eviction for free, the same way `RunStore` uses it: the
+  // oldest entry is the one seen first, and it is the one least likely to still be
+  // wanted.
+  if (cache.size >= CACHE_MAX_ENTRIES && !cache.has(url)) {
+    const oldest = cache.keys().next().value;
+    if (oldest !== undefined) cache.delete(oldest);
+  }
+  cache.set(url, page);
+
+  return page;
 }
 
 /**
