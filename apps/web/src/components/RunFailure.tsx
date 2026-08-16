@@ -14,6 +14,7 @@ const HEADINGS: Readonly<Record<RunFailureReason, string>> = {
   no_tool_call: 'Stopped without an answer',
   llm_error: 'The model could not be reached',
   internal_error: 'Something broke on our side',
+  cancelled: 'Cancelled',
 };
 
 const NEXT_STEPS: Readonly<Record<RunFailureReason, string>> = {
@@ -24,6 +25,7 @@ const NEXT_STEPS: Readonly<Record<RunFailureReason, string>> = {
   llm_error: 'This is usually transient. Ask again in a moment.',
   internal_error:
     'The failure has been logged. Ask again, and if it persists the run id above is the one to quote.',
+  cancelled: 'Stopped by request. Ask again whenever you are ready.',
 };
 
 export interface RunFailureProps {

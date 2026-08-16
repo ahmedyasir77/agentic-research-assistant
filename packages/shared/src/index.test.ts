@@ -130,6 +130,7 @@ describe('RunOutcome', () => {
       'no_tool_call',
       'llm_error',
       'internal_error',
+      'cancelled',
     ]);
   });
 });

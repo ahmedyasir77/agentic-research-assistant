@@ -49,6 +49,7 @@ async function driveRun(record: RunRecord, llm: LlmClient, deps: StartRunDeps): 
     policy: deps.policy,
     clock: systemClock,
     logger,
+    signal: record.signal,
   });
 
   try {

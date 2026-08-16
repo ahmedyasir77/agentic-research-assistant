@@ -211,6 +211,21 @@ body {
   cursor: not-allowed;
 }
 
+/* §5 — "Cancel" beside "Submit": plain Foreground text, no box of its own, so it
+   reads as the secondary action rather than a second thing to choose between. */
+.button--ghost {
+  border-color: transparent;
+  background: transparent;
+  color: var(--secondary);
+}
+
+.button--ghost:hover:not([disabled]),
+.button--ghost:focus-visible {
+  border-color: var(--rule-lit);
+  background: transparent;
+  color: var(--fg);
+}
+
 /* §5 Lists / menus — the examples are a menu, not a row of pills. */
 .examples {
   margin-top: var(--row);

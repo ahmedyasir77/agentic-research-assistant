@@ -1,12 +1,13 @@
 import { AgentEventSchema } from '@ara/shared';
 import { useCallback, useEffect, useReducer, useRef } from 'react';
 
-import { ApiError, createRun } from '../lib/api.ts';
+import { ApiError, cancelRun, createRun } from '../lib/api.ts';
 import { initialRunState, runReducer, type RunState } from '../lib/runReducer.ts';
 
 export interface RunStream {
   readonly state: RunState;
   readonly start: (query: string) => void;
+  readonly cancel: () => void;
   readonly reset: () => void;
 }
 
@@ -18,6 +19,9 @@ export interface RunStream {
 export function useRunStream(): RunStream {
   const [state, dispatch] = useReducer(runReducer, initialRunState);
   const sourceRef = useRef<EventSource | null>(null);
+  // Read from the cancel callback, which closes over the render that created it
+  // rather than the run id current when the user clicks — a ref is what stays live.
+  const runIdRef = useRef<string | undefined>(undefined);
 
   const disconnect = useCallback(() => {
     sourceRef.current?.close();
@@ -31,10 +35,12 @@ export function useRunStream(): RunStream {
   const start = useCallback(
     (query: string) => {
       disconnect();
+      runIdRef.current = undefined;
       dispatch({ type: 'submit', query, atMs: Date.now() });
 
       createRun(query)
         .then(({ runId, eventsUrl }) => {
+          runIdRef.current = runId;
           dispatch({ type: 'accepted', runId });
           sourceRef.current = subscribe(eventsUrl, dispatch, disconnect);
         })
@@ -45,12 +51,24 @@ export function useRunStream(): RunStream {
     [disconnect],
   );
 
+  // Fire-and-forget: the stream this hook is already watching is what reports the
+  // outcome, via the ordinary `run.failed` event with reason `cancelled` — this
+  // call just asks. A rejection here (the run finished a moment first, the
+  // network dropped) is not this hook's to show; the stream either delivers the
+  // real outcome or its own connection-dropped error, either of which already has
+  // a path to the screen.
+  const cancel = useCallback(() => {
+    const runId = runIdRef.current;
+    if (runId !== undefined) void cancelRun(runId);
+  }, []);
+
   const reset = useCallback(() => {
     disconnect();
+    runIdRef.current = undefined;
     dispatch({ type: 'reset' });
   }, [disconnect]);
 
-  return { state, start, reset };
+  return { state, start, cancel, reset };
 }
 
 function subscribe(

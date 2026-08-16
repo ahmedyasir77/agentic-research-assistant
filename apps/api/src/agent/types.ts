@@ -24,6 +24,8 @@ export interface AgentDeps {
   readonly policy: AgentPolicy;
   readonly clock: Clock;
   readonly logger: Logger;
+  /** Aborted from outside the loop — a cancel request — as opposed to `policy`'s own budgets. */
+  readonly signal: AbortSignal;
 }
 
 /**

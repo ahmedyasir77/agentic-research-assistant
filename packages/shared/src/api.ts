@@ -18,6 +18,15 @@ export const CreateRunResponseSchema = z.object({
 export type CreateRunResponse = z.infer<typeof CreateRunResponseSchema>;
 
 /**
+ * The request to cancel is accepted, not necessarily instantaneous: the loop
+ * notices the signal before its next step or the moment an in-flight model or
+ * tool call observes it, and the run still ends through the ordinary `run.failed`
+ * event, with reason `cancelled`, over the stream the caller is already watching.
+ */
+export const CancelRunResponseSchema = z.object({ runId: z.string().min(1) });
+export type CancelRunResponse = z.infer<typeof CancelRunResponseSchema>;
+
+/**
  * What the browser needs to know before it starts a run: which mode the server was
  * deployed in, which model is answering, and whether this tab still understands the
  * event contract. Everything else about a run arrives in `run.started`.

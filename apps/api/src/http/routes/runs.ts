@@ -1,4 +1,8 @@
-import { CreateRunRequestSchema, type CreateRunResponse } from '@ara/shared';
+import {
+  CreateRunRequestSchema,
+  type CancelRunResponse,
+  type CreateRunResponse,
+} from '@ara/shared';
 import { Router, type RequestHandler } from 'express';
 
 import { startRun, type StartRunDeps } from '../../runs/startRun.ts';
@@ -26,6 +30,7 @@ export function createRunsRouter(deps: RunsRouterDeps): Router {
   router.post('/', rateLimit, createRun(deps));
   router.get('/:runId', readTrace(deps));
   router.get('/:runId/events', streamEvents(deps));
+  router.post('/:runId/cancel', cancelRun(deps));
 
   return router;
 }
@@ -61,6 +66,29 @@ function readTrace(deps: RunsRouterDeps): RequestHandler<{ runId: string }> {
       );
     }
     throw problem.noTrace(`Run ${req.params.runId} stopped without producing a trace.`);
+  };
+}
+
+/**
+ * `202`, not `204`: cancelling is a request, not an instant fact. The run still
+ * ends through the `run.failed` event a subscriber is already watching — this
+ * route exists so a client with no open stream (or one that gave up on it) has a
+ * way to ask at all.
+ */
+function cancelRun(deps: RunsRouterDeps): RequestHandler<{ runId: string }> {
+  return (req, res) => {
+    const record = deps.store.get(req.params.runId);
+    if (record === undefined) throw notFound(req.params.runId);
+
+    if (record.status !== 'running') {
+      throw problem.alreadyFinished(
+        `Run ${req.params.runId} has already finished; there is nothing to cancel.`,
+      );
+    }
+
+    record.cancel();
+    const body: CancelRunResponse = { runId: record.runId };
+    res.status(202).json(body);
   };
 }
 

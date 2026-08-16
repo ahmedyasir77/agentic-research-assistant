@@ -19,6 +19,7 @@ export class RunRecord {
   /** Resolves when the run ends, however it ends. Shutdown waits on these. */
   readonly whenFinished: Promise<void>;
 
+  readonly #controller = new AbortController();
   readonly #markFinished: () => void;
   #trace: RunTrace | undefined;
   #finished = false;
@@ -43,6 +44,24 @@ export class RunRecord {
 
   get status(): RunStatus {
     return this.#trace?.status ?? (this.#finished ? 'failed' : 'running');
+  }
+
+  /** Handed to the agent loop as `AgentDeps.signal`, so cancelling is aborting. */
+  get signal(): AbortSignal {
+    return this.#controller.signal;
+  }
+
+  /**
+   * Asks the run to stop. Not synchronous: the loop notices the signal before its
+   * next step, or the moment an in-flight model or tool call observes it, and
+   * still ends through the ordinary `run.failed` path — with reason `cancelled` —
+   * rather than being torn down from outside it.
+   *
+   * A no-op once the run has already ended, so a cancel that loses a race with
+   * completion is not an error, just a request that arrived too late to matter.
+   */
+  cancel(): void {
+    if (!this.#finished) this.#controller.abort(new Error('Run cancelled by request'));
   }
 
   /**

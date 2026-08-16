@@ -44,6 +44,16 @@ export async function* runAgent(query: string, deps: AgentDeps): AgentRun {
     deadline.abort(new Error('Run exceeded its wall-clock budget'));
   }, policy.maxWallClockMs);
 
+  // A cancel request is an abort from outside the loop rather than one of its own
+  // budgets, so it rides the same deadline signal — an in-flight model call or
+  // tool is cut off exactly as it would be for a timeout — but `deps.signal.aborted`
+  // is what tells `settle` which of the two actually happened.
+  const onCancel = (): void => {
+    deadline.abort(new Error('Run cancelled by request'));
+  };
+  if (isAborted(deps.signal)) onCancel();
+  else deps.signal.addEventListener('abort', onCancel, { once: true });
+
   const messages: LlmMessage[] = [{ role: 'user', content: [{ type: 'text', text: query }] }];
   // Accumulated across every tool call in the run, and read once at the end by the
   // grounding check: what the tools returned, and which URL each part came from.
@@ -61,6 +71,13 @@ export async function* runAgent(query: string, deps: AgentDeps): AgentRun {
     yield recorder.event({ type: 'run.started', query, budgets, modelId: llm.modelId });
 
     for (let step = 0; ; step += 1) {
+      // Checked in the same place and the same way as every other budget: before
+      // spending a step rather than after, so a cancel that lands between steps
+      // stops the run without one more model call.
+      if (isAborted(deps.signal)) {
+        return yield* settle(recorder, evidence, held, 'cancelled', CANCEL_MESSAGE, lastText);
+      }
+
       const verdict = checkBudget(policy, { step, elapsedMs: recorder.elapsedMs });
       if (!verdict.withinBudget) {
         return yield* settle(
@@ -94,6 +111,15 @@ export async function* runAgent(query: string, deps: AgentDeps): AgentRun {
         // and reporting it as one sends the user to "try again in a moment" when the
         // fix is a longer budget. The signal is the only thing that knows which
         // happened, because an aborted SDK call throws its own generic error.
+        //
+        // `deps.signal` is checked first: it is a strict subset of what trips
+        // `deadline` (a cancel always aborts the deadline too, never the reverse),
+        // so a run cancelled a moment before its wall clock would also have run out
+        // is still reported as what the caller actually asked for.
+        if (isAborted(deps.signal)) {
+          logger.info({ runId: deps.runId, step }, 'model call cut off by a cancel request');
+          return yield* settle(recorder, evidence, held, 'cancelled', CANCEL_MESSAGE, lastText);
+        }
         if (deadline.signal.aborted) {
           logger.warn({ runId: deps.runId, step }, 'model call cut off by wall-clock budget');
           return yield* settle(
@@ -209,7 +235,27 @@ export async function* runAgent(query: string, deps: AgentDeps): AgentRun {
     }
   } finally {
     clearTimeout(timer);
+    deps.signal.removeEventListener('abort', onCancel);
   }
+}
+
+const CANCEL_MESSAGE = 'The run was cancelled.';
+
+/**
+ * Reads `signal.aborted` through a function call rather than as `deps.signal.aborted`
+ * at the call site.
+ *
+ * `AbortSignal.aborted` is declared `readonly`, and TypeScript's control-flow
+ * analysis narrows a `readonly` property across an `await` the same way it would a
+ * `const` — which is correct for a property that cannot change, and wrong for one
+ * whose entire purpose is to change while other code is running. Without this, the
+ * loop-top check narrows the compiler's belief to "not aborted" for the rest of that
+ * iteration, silently past the `await withRetry(...)` a cancel is specifically meant
+ * to interrupt — the code would still run correctly, but a linter watching for
+ * exactly this class of mistake would have nothing left to catch it with.
+ */
+function isAborted(signal: AbortSignal): boolean {
+  return signal.aborted;
 }
 
 function describeError(error: unknown): string {

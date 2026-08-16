@@ -19,7 +19,7 @@ import './styles/app.css';
  * order the user experiences it.
  */
 export function App(): JSX.Element {
-  const { state, start } = useRunStream();
+  const { state, start, cancel } = useRunStream();
   const live = isRunning(state);
 
   return (
@@ -27,7 +27,7 @@ export function App(): JSX.Element {
       <Masthead />
 
       <main className="app">
-        <Composer busy={live} onSubmit={start} />
+        <Composer busy={live} onSubmit={start} onCancel={cancel} />
 
         {state.phase === 'idle' ? (
           <section className="idle">

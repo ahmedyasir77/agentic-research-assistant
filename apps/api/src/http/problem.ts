@@ -67,6 +67,14 @@ export const problem = {
       detail,
     }),
 
+  alreadyFinished: (detail: string): ProblemError =>
+    new ProblemError({
+      status: 409,
+      title: 'The run has already finished.',
+      type: '/problems/run-already-finished',
+      detail,
+    }),
+
   payloadTooLarge: (detail: string): ProblemError =>
     new ProblemError({
       status: 413,

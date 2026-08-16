@@ -6,6 +6,12 @@ import {
   type CreateRunResponse,
 } from '@ara/shared';
 
+/** Best-effort by design: a run near the end of its own life is not an error. */
+export async function cancelRun(runId: string): Promise<void> {
+  const response = await fetch(`/api/runs/${runId}/cancel`, { method: 'POST' });
+  if (!response.ok && response.status !== 409) throw await toApiError(response);
+}
+
 /**
  * The API returns exactly one error shape, so this is the one place that reads it.
  * `detail` is written for a person — the UI shows it verbatim rather than inventing

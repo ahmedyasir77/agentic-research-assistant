@@ -102,4 +102,27 @@ describe('RunStore', () => {
     // Backpressure rather than unbounded memory: there is nothing safe to evict.
     expect(() => store.create('second')).toThrow(RunCapacityError);
   });
+
+  it('aborts the signal handed to the agent loop when cancelled', () => {
+    const store = new RunStore();
+    const record = store.create('anything');
+
+    expect(record.signal.aborted).toBe(false);
+    record.cancel();
+    expect(record.signal.aborted).toBe(true);
+  });
+
+  it('does nothing to a run that has already finished', () => {
+    const store = new RunStore();
+    const record = store.create('anything');
+    record.finish(trace(record.runId));
+
+    // Not an error: a cancel that loses a race with completion just arrived too
+    // late to matter, and the signal firing after the fact would mean nothing —
+    // the loop that would have read it is not running any more.
+    expect(() => {
+      record.cancel();
+    }).not.toThrow();
+    expect(record.signal.aborted).toBe(false);
+  });
 });

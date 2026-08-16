@@ -68,6 +68,7 @@ function deps(
     clock?: Clock;
     llm?: FakeLlmClient;
     http?: HttpClient;
+    signal?: AbortSignal;
   } = {},
 ): AgentDeps {
   return {
@@ -84,6 +85,10 @@ function deps(
     policy: { ...DEFAULT_POLICY, ...overrides.policy },
     clock: overrides.clock ?? fakeClock(),
     logger: silentLogger,
+    // A fresh, never-aborted controller by default: cancellation is exercised
+    // explicitly, in its own scenario, rather than by every other test remembering
+    // to pass one.
+    signal: overrides.signal ?? new AbortController().signal,
   };
 }
 
@@ -817,6 +822,62 @@ describe('failures outside the model', () => {
       2,
     );
     expect(trace.steps[0]?.toolCalls).toHaveLength(2);
+  });
+});
+
+describe('scenario 8 — cancellation', () => {
+  it('stops before the next step rather than spending another model call', async () => {
+    const searching = turn.toolCall([{ id: 'c', name: 'web_search', input: { query: 'more' } }]);
+    const controller = new AbortController();
+    const llm = createFakeLlmClient([searching, searching, searching]);
+    const agentDeps = deps([], { llm, signal: controller.signal });
+
+    // Cancelled once the first step's tool call is under way, so the run has
+    // genuinely started rather than being cancelled before anything happened.
+    const iterator = runAgent('anything', agentDeps);
+    const events: AgentEvent[] = [];
+    for (let next = await iterator.next(); ; next = await iterator.next()) {
+      if (next.done) {
+        expect(next.value.outcome).toBe('cancelled');
+        expect(next.value.status).toBe('failed');
+        break;
+      }
+      events.push(next.value);
+      if (next.value.type === 'tool.called') controller.abort();
+    }
+
+    expect(llm.requests).toHaveLength(1);
+    const failed = events.at(-1);
+    expect(failed?.type).toBe('run.failed');
+    expect(failed?.type === 'run.failed' && failed.reason).toBe('cancelled');
+  });
+
+  it('cuts off a model call already in flight, rather than waiting for it or the wall clock', async () => {
+    // The request goes out clean — the per-step check has already passed — and the
+    // cancel arrives while it is genuinely in flight, the same way it would for a
+    // real SDK call mid-request. Mirrors the wall-clock test above, which does the
+    // same thing with a timer instead of an external signal.
+    const controller = new AbortController();
+    const llm = {
+      modelId: 'fake-model',
+      complete: (request: { signal?: AbortSignal }) =>
+        new Promise<LlmResponse>((_resolve, reject) => {
+          request.signal?.addEventListener('abort', () => {
+            reject(new LlmError('Request was aborted.'));
+          });
+          controller.abort();
+        }),
+    };
+    const agentDeps = {
+      ...deps([], { policy: { maxWallClockMs: 60_000 }, signal: controller.signal }),
+      llm,
+    };
+
+    const { trace } = await run('a question the caller changes its mind about', agentDeps);
+
+    expect(trace.status).toBe('failed');
+    expect(trace.outcome).toBe('cancelled');
+    expect(trace.failureMessage).toBe('The run was cancelled.');
   });
 });
 

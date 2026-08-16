@@ -1,6 +1,7 @@
 import {
   AgentEventSchema,
   AppConfigSchema,
+  CancelRunResponseSchema,
   CreateRunResponseSchema,
   EVENT_SCHEMA_VERSION,
   ListToolsResponseSchema,
@@ -244,6 +245,45 @@ describe('GET /api/runs/:runId', () => {
     const response = await request(app).get('/api/runs/run_nope/events').expect(404);
 
     expect(response.headers['content-type']).toContain(PROBLEM_CONTENT_TYPE);
+  });
+});
+
+describe('POST /api/runs/:runId/cancel', () => {
+  it('stops a run in flight and reports it as cancelled once it settles', async () => {
+    const { runtime, release } = gatedRuntime();
+    const { app, store } = buildApi({ runtime });
+    const { runId } = await createRun(app);
+
+    const response = await request(app).post(`/api/runs/${runId}/cancel`).expect(202);
+    expect(CancelRunResponseSchema.parse(response.body).runId).toBe(runId);
+
+    // The gate is what was holding the model call open — releasing it is what
+    // lets the loop discover, on its next turn, that the run was cancelled.
+    release();
+    await store.get(runId)?.whenFinished;
+
+    const trace = RunTraceSchema.parse((await request(app).get(`/api/runs/${runId}`)).body);
+    expect(trace.status).toBe('failed');
+    expect(trace.outcome).toBe('cancelled');
+  });
+
+  it('returns problem+json for a run this instance has never heard of', async () => {
+    const { app } = buildApi();
+
+    const response = await request(app).post('/api/runs/run_nope/cancel').expect(404);
+    const problem = ProblemDetailsSchema.parse(response.body);
+
+    expect(problem.type).toBe('/problems/run-not-found');
+  });
+
+  it('says there is nothing left to cancel once the run has finished', async () => {
+    const { app, store } = buildApi();
+    const { runId } = await startAndFinish(app, store);
+
+    const response = await request(app).post(`/api/runs/${runId}/cancel`).expect(409);
+    const problem = ProblemDetailsSchema.parse(response.body);
+
+    expect(problem.type).toBe('/problems/run-already-finished');
   });
 });
 

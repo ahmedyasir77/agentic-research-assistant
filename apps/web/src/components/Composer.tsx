@@ -18,6 +18,7 @@ const EXAMPLES: readonly string[] = [
 export interface ComposerProps {
   readonly busy: boolean;
   readonly onSubmit: (query: string) => void;
+  readonly onCancel: () => void;
 }
 
 /**
@@ -29,7 +30,7 @@ export interface ComposerProps {
  * inside the button's accessible name, so the submit would announce as "▸ Ask"
  * and an example would announce with a selector character it does not have.
  */
-export function Composer({ busy, onSubmit }: ComposerProps): JSX.Element {
+export function Composer({ busy, onSubmit, onCancel }: ComposerProps): JSX.Element {
   const [query, setQuery] = useState('');
 
   const submit: SubmitEventHandler<HTMLFormElement> = (event) => {
@@ -73,6 +74,15 @@ export function Composer({ busy, onSubmit }: ComposerProps): JSX.Element {
           {busy && <Spinner />}
           {busy ? 'Working' : 'Ask'}
         </button>
+
+        {/* DESIGN.md §5 — "▸ Submit    Cancel" is a plain-text action beside the
+            primary one, not a second bordered button. Only present once there is a
+            run to stop, so idle and completed states are back to one button. */}
+        {busy && (
+          <button className="button button--ghost" type="button" onClick={onCancel}>
+            Stop
+          </button>
+        )}
       </div>
 
       <div className="examples">

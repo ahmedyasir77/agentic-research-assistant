@@ -164,6 +164,7 @@ export const RunFailureReasonSchema = z.enum([
   'no_tool_call',
   'llm_error',
   'internal_error',
+  'cancelled',
 ]);
 export type RunFailureReason = z.infer<typeof RunFailureReasonSchema>;
 
